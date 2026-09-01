@@ -635,13 +635,27 @@
   .diff-table td.cell-add{background:var(--added-bg); color:var(--added-text); font-weight:600;}
 
   /* pdf */
-  .pdf-pages{display:flex; flex-direction:column; gap:24px; max-width:1200px; margin:0 auto;}
-  .pdf-page-row{display:flex; gap:16px;}
+  .pdf-nav{display:flex; align-items:center; gap:8px;}
+  .pdf-compare-wrap{display:flex; gap:0; align-items:flex-start; max-width:1240px; margin:0 auto;}
+  .pdf-pages{display:flex; flex-direction:column; gap:24px; flex:1; min-width:0;}
+  .pdf-page-row{display:flex; gap:16px; scroll-margin:20px; border-radius:6px; transition:box-shadow 0.2s;}
+  .pdf-page-row.pdf-jump-target{box-shadow:0 0 0 3px var(--amber);}
   .pdf-page-col{flex:1; min-width:0;}
   .pdf-page-label{font-family:var(--mono); font-size:11px; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;}
   .pdf-page-col img{width:100%; border:1px solid var(--line); border-radius:4px; display:block;}
   .pdf-page-frame{position:relative; border:1px solid var(--line); border-radius:4px; overflow:hidden; width:100%;}
   .pdf-page-frame img{width:100%; height:100%; display:block; border:none; border-radius:0; object-fit:fill;}
+  .pdf-gutter{
+    width:22px; flex-shrink:0; align-self:stretch;
+    position:sticky; top:70px;
+    background:var(--panel); border-left:1px solid var(--line); border-right:1px solid var(--line);
+    border-radius:4px; margin-left:12px;
+    height:calc(100vh - 140px);
+    overflow:hidden;
+  }
+  .pdf-gutter-marks{position:relative; height:100%;}
+  .pdf-gutter-mark{position:absolute; left:4px; right:4px; background:var(--amber); border-radius:2px; cursor:pointer; min-height:3px;}
+  .pdf-gutter-mark:hover{background:#d68f38;}
   .pdf-hl{position:absolute; border-radius:2px; pointer-events:none;}
   .pdf-hl-rem{background:rgba(232,165,165,0.55); outline:1px solid rgba(138,44,44,0.35);}
   .pdf-hl-add{background:rgba(169,199,230,0.55); outline:1px solid rgba(31,78,121,0.35);}
@@ -1574,15 +1588,29 @@
       ]);
       const maxPages = Math.max(leftPages.length, rightPages.length);
       let totalRem = 0, totalAdd = 0;
+      const changedPageIndices = []; // which pages (0-based) have at least one highlight
+
       let html = `<div class="docx-toolbar">
         <span class="rich-label">${labelOverride || 'Original pages, differences highlighted in place'}</span>
+        <div class="pdf-nav">
+          <button class="nav-btn" id="pdfPrevChange" title="Previous changed page">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 15l-6-6-6 6"/></svg>
+          </button>
+          <button class="nav-btn" id="pdfNextChange" title="Next changed page">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <span class="change-counter" id="pdfChangeCounter">0 of 0 changed pages</span>
+        </div>
         <span class="stat-pill rem" id="pdfRemStat">0 removed</span>
         <span class="stat-pill add" id="pdfAddStat">0 added</span>
-      </div><div class="pdf-pages">`;
+      </div>
+      <div class="pdf-compare-wrap">
+        <div class="pdf-pages" id="pdfPagesList">`;
 
       for(let i=0; i<maxPages; i++){
         const lp = leftPages[i], rp = rightPages[i];
         let leftHighlights = '', rightHighlights = '';
+        let pageHasChange = false;
 
         if(lp && rp){
           const leftWords = lp.words.map(w => w.text);
@@ -1595,22 +1623,24 @@
             } else if(part.removed){
               part.value.forEach(() => {
                 const w = lp.words[li]; li++;
-                if(w){ leftHighlights += boxHtml(w, 'pdf-hl-rem', lp.width, lp.height); totalRem++; }
+                if(w){ leftHighlights += boxHtml(w, 'pdf-hl-rem', lp.width, lp.height); totalRem++; pageHasChange = true; }
               });
             } else if(part.added){
               part.value.forEach(() => {
                 const w = rp.words[ri]; ri++;
-                if(w){ rightHighlights += boxHtml(w, 'pdf-hl-add', rp.width, rp.height); totalAdd++; }
+                if(w){ rightHighlights += boxHtml(w, 'pdf-hl-add', rp.width, rp.height); totalAdd++; pageHasChange = true; }
               });
             }
           });
         } else if(lp && !rp){
-          lp.words.forEach(w => { leftHighlights += boxHtml(w, 'pdf-hl-rem', lp.width, lp.height); totalRem++; });
+          lp.words.forEach(w => { leftHighlights += boxHtml(w, 'pdf-hl-rem', lp.width, lp.height); totalRem++; pageHasChange = true; });
         } else if(rp && !lp){
-          rp.words.forEach(w => { rightHighlights += boxHtml(w, 'pdf-hl-add', rp.width, rp.height); totalAdd++; });
+          rp.words.forEach(w => { rightHighlights += boxHtml(w, 'pdf-hl-add', rp.width, rp.height); totalAdd++; pageHasChange = true; });
         }
 
-        html += `<div class="pdf-page-row">
+        if(pageHasChange) changedPageIndices.push(i);
+
+        html += `<div class="pdf-page-row${pageHasChange ? ' pdf-page-changed' : ''}" data-page-idx="${i}">
           <div class="pdf-page-col">
             <div class="pdf-page-label">Page ${i+1} — ${escapeHtml(fileNameL)}</div>
             ${lp ? `<div class="pdf-page-frame" style="aspect-ratio:${lp.width}/${lp.height};"><img src="${lp.img}">${leftHighlights}</div>` : '<div class="pdf-missing">No page</div>'}
@@ -1621,13 +1651,68 @@
           </div>
         </div>`;
       }
-      html += `</div>`;
+      html += `</div>
+        <div class="pdf-gutter" id="pdfGutter"><div class="pdf-gutter-marks" id="pdfGutterMarks"></div></div>
+      </div>`;
+
       showRichResult(html);
       el('pdfRemStat').textContent = totalRem + ' removed';
       el('pdfAddStat').textContent = totalAdd + ' added';
+      setupPdfNavigation(changedPageIndices);
     } finally {
       hideLoading();
     }
+  }
+
+  function setupPdfNavigation(changedPageIndices){
+    const counterEl = el('pdfChangeCounter');
+    const prevBtn = el('pdfPrevChange');
+    const nextBtn = el('pdfNextChange');
+    const gutterMarks = el('pdfGutterMarks');
+    const pagesList = el('pdfPagesList');
+    let currentIdx = -1;
+
+    counterEl.textContent = (changedPageIndices.length ? 1 : 0) + ' of ' + changedPageIndices.length + ' changed pages';
+    prevBtn.disabled = changedPageIndices.length === 0;
+    nextBtn.disabled = changedPageIndices.length === 0;
+
+    function jumpTo(pos){
+      if(pos < 0 || pos >= changedPageIndices.length) return;
+      currentIdx = pos;
+      counterEl.textContent = (pos + 1) + ' of ' + changedPageIndices.length + ' changed pages';
+      const pageIdx = changedPageIndices[pos];
+      const row = pagesList.querySelector('[data-page-idx="' + pageIdx + '"]');
+      document.querySelectorAll('.pdf-page-row.pdf-jump-target').forEach(r => r.classList.remove('pdf-jump-target'));
+      if(row){
+        row.classList.add('pdf-jump-target');
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }
+
+    prevBtn.addEventListener('click', () => jumpTo(currentIdx <= 0 ? changedPageIndices.length - 1 : currentIdx - 1));
+    nextBtn.addEventListener('click', () => jumpTo((currentIdx + 1) % changedPageIndices.length));
+
+    // build the clickable minimap once layout has settled
+    requestAnimationFrame(() => {
+      const totalHeight = pagesList.scrollHeight || 1;
+      gutterMarks.innerHTML = '';
+      changedPageIndices.forEach(pageIdx => {
+        const row = pagesList.querySelector('[data-page-idx="' + pageIdx + '"]');
+        if(!row) return;
+        const top = (row.offsetTop / totalHeight) * 100;
+        const height = Math.max((row.offsetHeight / totalHeight) * 100, 0.6);
+        const mark = document.createElement('div');
+        mark.className = 'pdf-gutter-mark';
+        mark.style.top = top + '%';
+        mark.style.height = height + '%';
+        mark.title = 'Page ' + (pageIdx + 1) + ' — jump to change';
+        mark.addEventListener('click', () => {
+          const pos = changedPageIndices.indexOf(pageIdx);
+          jumpTo(pos);
+        });
+        gutterMarks.appendChild(mark);
+      });
+    });
   }
 
   function boxHtml(w, cls, pageWidth, pageHeight){
