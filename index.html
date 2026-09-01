@@ -739,7 +739,7 @@
           Conversion server settings
         </button>
         <div class="server-panel" id="serverPanel" style="display:none;">
-          <p>Optional. For true highlighted comparison across <em>different</em> file types (e.g. Word vs PowerPoint), point this at a running <a href="#" onclick="return false;">DiffChecker convert server</a>. Leave blank to use the built-in browser-only comparison.</p>
+          <p>A conversion server is already configured by default, enabling true highlighted comparison across <em>different</em> file types (e.g. Word vs PowerPoint). Change the URL below to point at a different server, or clear it and save to turn this off and use browser-only comparison instead.</p>
           <div class="server-input-row">
             <input type="text" id="serverUrlInput" placeholder="https://your-service.onrender.com">
             <button class="btn-small" id="serverSaveBtn">Save</button>
@@ -1683,12 +1683,21 @@
 
   // ---------- Dispatcher ----------
   // ---------- Optional conversion server (for true cross-format highlighting) ----------
+  // Baked-in default so the whole team gets cross-format comparison with zero
+  // setup. A per-browser override (via the settings panel) still takes priority.
+  const DEFAULT_SERVER_URL = 'https://diffchecker-server-q57c.onrender.com';
   const SERVER_URL_KEY = 'diffchecker_server_url';
+  const SERVER_OFF_SENTINEL = '__off__';
   function getServerUrl(){
-    try{ return (localStorage.getItem(SERVER_URL_KEY) || '').trim(); } catch(e){ return ''; }
+    try{
+      const stored = (localStorage.getItem(SERVER_URL_KEY) || '').trim();
+      if(stored === SERVER_OFF_SENTINEL) return '';
+      return stored || DEFAULT_SERVER_URL;
+    } catch(e){ return DEFAULT_SERVER_URL; }
   }
   function setServerUrl(url){
-    try{ localStorage.setItem(SERVER_URL_KEY, url.trim()); } catch(e){ /* ignore */ }
+    const trimmed = url.trim();
+    try{ localStorage.setItem(SERVER_URL_KEY, trimmed === '' ? SERVER_OFF_SENTINEL : trimmed); } catch(e){ /* ignore */ }
   }
 
   async function convertToPdfViaServer(buf, filename, serverUrl){
