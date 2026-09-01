@@ -81,7 +81,7 @@
     font-size:13px;
     font-weight:500;
     padding:7px 14px;
-    border-radius:5px;
+    border-radius:6px;
     border:1px solid rgba(255,255,255,0.2);
     background:rgba(255,255,255,0.06);
     color:#fff;
@@ -89,18 +89,21 @@
     display:flex;
     align-items:center;
     gap:6px;
-    transition:background 0.15s, border-color 0.15s;
+    transition:background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
     white-space:nowrap;
   }
-  .btn:hover{background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.35);}
-  .btn:disabled{opacity:0.35; cursor:not-allowed;}
+  .btn:hover:not(:disabled){background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.35);}
+  .btn:active:not(:disabled){transform:translateY(1px);}
+  .btn:disabled{opacity:0.32; cursor:not-allowed;}
   .btn-primary{
     background:var(--amber);
     border-color:var(--amber);
     color:#1a1305;
     font-weight:600;
+    box-shadow:0 1px 2px rgba(0,0,0,0.15);
   }
-  .btn-primary:hover{background:#d68f38;}
+  .btn-primary:hover:not(:disabled){background:#d68f38;}
+  .btn-primary:disabled{background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.2); color:#fff; box-shadow:none;}
   .btn svg{width:15px;height:15px; flex-shrink:0;}
 
   /* ---------- Landing / input screen ---------- */
@@ -146,11 +149,14 @@
   .input-col{
     background:var(--panel);
     border:1px solid var(--line);
-    border-radius:8px;
+    border-radius:10px;
     display:flex;
     flex-direction:column;
     min-height:420px;
+    box-shadow:0 1px 3px rgba(26,35,50,0.04), 0 1px 2px rgba(26,35,50,0.03);
+    transition:box-shadow 0.2s ease;
   }
+  .input-col:hover{box-shadow:0 4px 12px rgba(26,35,50,0.06), 0 1px 3px rgba(26,35,50,0.04);}
   .input-col.left{border-top:3px solid var(--removed-border);}
   .input-col.right{border-top:3px solid var(--added-border);}
   .input-col-head{
@@ -567,7 +573,7 @@
 
   /* docx */
   .docx-panes{display:flex; gap:20px; max-width:1400px; margin:0 auto;}
-  .docx-pane{flex:1; min-width:0; background:#fff; border:1px solid var(--line); border-radius:8px; overflow:hidden; align-self:flex-start;}
+  .docx-pane{flex:1; min-width:0; background:#fff; border:1px solid var(--line); border-radius:10px; overflow:hidden; align-self:flex-start; box-shadow:0 1px 3px rgba(26,35,50,0.05);}
   .docx-pane-head{
     padding:10px 16px;
     font-family:var(--mono);
@@ -588,7 +594,8 @@
 
   /* pptx */
   .pptx-list{display:flex; flex-direction:column; gap:16px; max-width:1100px; margin:0 auto;}
-  .slide-card{background:#fff; border:1px solid var(--line); border-radius:8px; overflow:hidden;}
+  .slide-card{background:#fff; border:1px solid var(--line); border-radius:10px; overflow:hidden; box-shadow:0 1px 3px rgba(26,35,50,0.05); transition:box-shadow 0.2s ease;}
+  .slide-card:hover{box-shadow:0 4px 12px rgba(26,35,50,0.07);}
   .slide-card.slide-changed{border-color:var(--amber);}
   .slide-card-head{
     padding:9px 16px;
@@ -643,7 +650,7 @@
   .pdf-page-col{flex:1; min-width:0;}
   .pdf-page-label{font-family:var(--mono); font-size:11px; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;}
   .pdf-page-col img{width:100%; border:1px solid var(--line); border-radius:4px; display:block;}
-  .pdf-page-frame{position:relative; border:1px solid var(--line); border-radius:4px; overflow:hidden; width:100%;}
+  .pdf-page-frame{position:relative; border:1px solid var(--line); border-radius:6px; overflow:hidden; width:100%; box-shadow:0 1px 4px rgba(26,35,50,0.06);}
   .pdf-page-frame img{width:100%; height:100%; display:block; border:none; border-radius:0; object-fit:fill;}
   .pdf-gutter{
     width:22px; flex-shrink:0; align-self:stretch;
@@ -670,15 +677,15 @@
     <span>DiffChecker</span>
   </div>
   <div class="topbar-actions" id="topActions">
-    <button class="btn" id="newCompareBtn" style="display:none;">
+    <button class="btn" id="newCompareBtn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
       New comparison
     </button>
-    <button class="btn" id="swapBtn" style="display:none;">
+    <button class="btn" id="swapBtn" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4-4 4M3 7h18M7 21l-4-4 4-4M21 17H3"/></svg>
       Swap sides
     </button>
-    <button class="btn btn-primary" id="downloadBtn" style="display:none;">
+    <button class="btn btn-primary" id="downloadBtn" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
       Export report
     </button>
@@ -1374,9 +1381,8 @@
   function showRichResult(html){
     introScreen.classList.add('hidden');
     resultScreen.classList.add('active');
-    el('newCompareBtn').style.display = '';
-    el('swapBtn').style.display = '';
-    el('downloadBtn').style.display = '';
+    el('swapBtn').disabled = false;
+    el('downloadBtn').disabled = false;
     document.querySelector('.toolstrip').style.display = 'none';
     el('panesWrap').style.display = 'none';
     el('singlePane').style.display = 'none';
@@ -1846,18 +1852,26 @@
     }
     showErr('');
 
-    const serverUrl = getServerUrl();
-    if(serverUrl){
-      try{
-        await renderServerCompare(serverUrl);
-        return;
-      } catch(err){
-        console.error('Server compare failed, falling back:', err);
-        showErr('Server comparison failed (' + err.message + ') — using the built-in comparison instead.');
+    const mode = detectMode();
+
+    // The server-conversion pipeline is only for genuinely different file types
+    // (no shared native renderer exists for those). Same-type pairs already have
+    // a better native comparison — real formatting for Word, real slide structure
+    // AND speaker notes for PowerPoint, a real cell grid for Excel, and the same
+    // position-highlighted page view for PDF — so they never go through the server.
+    if(mode === 'mixed'){
+      const serverUrl = getServerUrl();
+      if(serverUrl){
+        try{
+          await renderServerCompare(serverUrl);
+          return;
+        } catch(err){
+          console.error('Server compare failed, falling back:', err);
+          showErr('Server comparison failed (' + err.message + ') — showing each file in its native format instead, with no cross-format highlighting.');
+        }
       }
     }
 
-    const mode = detectMode();
     currentMode = mode;
     try{
       if(mode === 'docx') await renderDocxCompare();
@@ -1929,9 +1943,8 @@
   function renderResult(){
     introScreen.classList.add('hidden');
     resultScreen.classList.add('active');
-    el('newCompareBtn').style.display = '';
-    el('swapBtn').style.display = '';
-    el('downloadBtn').style.display = '';
+    el('swapBtn').disabled = false;
+    el('downloadBtn').disabled = false;
     showTextResultUI();
 
     el('headLeft').textContent = fileNameL || 'Original';
@@ -2105,9 +2118,27 @@
   el('newCompareBtn').addEventListener('click', () => {
     resultScreen.classList.remove('active');
     introScreen.classList.remove('hidden');
-    el('newCompareBtn').style.display = 'none';
-    el('swapBtn').style.display = 'none';
-    el('downloadBtn').style.display = 'none';
+    el('swapBtn').disabled = true;
+    el('downloadBtn').disabled = true;
+
+    // Fully reset — otherwise old content/state leaks into the next comparison
+    el('textLeft').value = '';
+    el('textRight').value = '';
+    el('fileLeft').value = '';
+    el('fileRight').value = '';
+    el('fileNameLeft').textContent = '';
+    el('fileNameRight').textContent = '';
+    fileTextLeft = null; fileTextRight = null;
+    fileNameL = ''; fileNameR = '';
+    docMeta.left = null; docMeta.right = null;
+    lastDiffData = null;
+    currentMode = 'text';
+    el('docLeft').innerHTML = '';
+    el('docRight').innerHTML = '';
+    el('docSingle').innerHTML = '';
+    el('richBody').innerHTML = '';
+    el('gutterMarks').innerHTML = '';
+    showErr('');
   });
 
   el('swapBtn').addEventListener('click', () => {
@@ -2132,27 +2163,29 @@
         <div class="col"><h2>${escapeHtml(fileNameR||'Revised')}</h2>${el('docRight').innerHTML}</div>
       </div>`;
     } else {
-      bodyHtml = el('richBody').innerHTML;
+      bodyHtml = `<div class="rich-result" style="display:flex;"><div class="rich-body" style="overflow:visible;">${el('richBody').innerHTML}</div></div>`;
     }
-    const report = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Comparison Report</title>
+    // Reuse the app's own live stylesheet rather than a hand-maintained copy —
+    // a hand-copied subset previously fell out of sync and caused pages to
+    // render at native (huge) pixel width with no responsive constraint.
+    const liveCss = document.querySelector('style') ? document.querySelector('style').textContent : '';
+    const report = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Comparison Report</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-      body{font-family:'IBM Plex Mono',monospace; margin:0; padding:24px; background:#f7f6f3; color:#1a2332;}
-      h1{font-family:sans-serif; font-size:18px;}
-      .cols{display:flex; gap:16px;}
-      .col{flex:1; background:#fff; border:1px solid #e2e0da; border-radius:6px; padding:16px; font-size:12.5px; line-height:1.8; white-space:pre-wrap; word-break:break-word;}
-      .col h2{font-family:sans-serif; font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#4a5568; margin-top:0;}
-      mark.diff-del{background:#fbe4e4; color:#8a2c2c; text-decoration:line-through;}
-      mark.diff-add{background:#e1ecf7; color:#1f4e79;}
-      .doc-line{display:flex;} .ln{width:36px;flex-shrink:0;color:#b8b5ac;text-align:right;padding-right:10px;font-size:11px;} .content{flex:1;}
-      .docx-panes,.pptx-list,.pdf-pages{display:flex; gap:16px;} .docx-pane,.pdf-page-col{flex:1; background:#fff; border:1px solid #e2e0da; border-radius:6px; padding:14px;}
-      .removed-para{background:#fbe4e4; border-left:3px solid #e8a5a5; padding-left:10px;}
-      .added-para{background:#e1ecf7; border-left:3px solid #a9c7e6; padding-left:10px;}
-      .diff-table{border-collapse:collapse; font-size:12px;} .diff-table td{border:1px solid #e2e0da; padding:4px 10px;}
-      .cell-mod{background:#fdf1de; color:#c17f2e; font-weight:600;} .cell-rem{background:#fbe4e4; color:#8a2c2c; text-decoration:line-through;} .cell-add{background:#e1ecf7; color:#1f4e79; font-weight:600;}
-      .slide-card{border:1px solid #e2e0da; border-radius:6px; margin-bottom:14px; padding:10px; background:#fff;}
+      ${liveCss}
+      body{margin:0; padding:24px; overflow-x:hidden;}
+      .rich-body{padding:0;}
+      .cols{display:flex; gap:16px; max-width:1400px; margin:0 auto;}
+      .col{flex:1; min-width:0; background:#fff; border:1px solid var(--line); border-radius:6px; padding:16px; font-family:var(--mono); font-size:12.5px; line-height:1.8; white-space:pre-wrap; word-break:break-word;}
+      .col h2{font-family:var(--sans); font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft); margin-top:0;}
+      .report-head{font-family:var(--sans); max-width:1400px; margin:0 auto 16px;}
+      .report-head h1{font-size:18px; margin:0 0 4px;}
+      .report-head p{font-size:12px; color:var(--ink-soft); margin:0;}
     </style></head><body>
-    <h1>Document Comparison Report — ${new Date().toLocaleString()}</h1>
-    <p style="font-family:sans-serif;font-size:12px;color:#4a5568;">${escapeHtml(fileNameL||'Original')} vs ${escapeHtml(fileNameR||'Revised')}</p>
+    <div class="report-head">
+      <h1>Document Comparison Report — ${new Date().toLocaleString()}</h1>
+      <p>${escapeHtml(fileNameL||'Original')} vs ${escapeHtml(fileNameR||'Revised')}</p>
+    </div>
     ${bodyHtml}
     </body></html>`;
     const blob = new Blob([report], {type:'text/html'});
