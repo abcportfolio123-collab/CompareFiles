@@ -1,0 +1,2062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DiffChecker — Document Comparison</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsdiff/5.2.0/diff.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#1a2332;
+    --ink-soft:#4a5568;
+    --paper:#f7f6f3;
+    --panel:#ffffff;
+    --line:#e2e0da;
+    --line-strong:#c9c6bd;
+    --accent:#3a5a7a;
+    --accent-soft:#e8eef4;
+    --removed-bg:#fbe4e4;
+    --removed-text:#8a2c2c;
+    --removed-border:#e8a5a5;
+    --added-bg:#e1ecf7;
+    --added-text:#1f4e79;
+    --added-border:#a9c7e6;
+    --amber:#c17f2e;
+    --mono:'IBM Plex Mono', monospace;
+    --sans:'IBM Plex Sans', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    font-family:var(--sans);
+    background:var(--paper);
+    color:var(--ink);
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:10px 20px;
+    background:var(--ink);
+    color:#fff;
+    flex-shrink:0;
+    z-index:20;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-weight:600;
+    font-size:16px;
+    letter-spacing:0.2px;
+  }
+  .brand .mark{
+    width:22px;height:22px;
+    border-radius:3px;
+    background:linear-gradient(135deg, var(--removed-bg) 0 50%, var(--added-bg) 50% 100%);
+    position:relative;
+    flex-shrink:0;
+    border:1px solid rgba(255,255,255,0.25);
+  }
+  .brand .mark::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(135deg, transparent 48%, rgba(255,255,255,0.6) 49%, rgba(255,255,255,0.6) 51%, transparent 52%);
+  }
+  .topbar-actions{display:flex; gap:8px; align-items:center;}
+  .btn{
+    font-family:var(--sans);
+    font-size:13px;
+    font-weight:500;
+    padding:7px 14px;
+    border-radius:5px;
+    border:1px solid rgba(255,255,255,0.2);
+    background:rgba(255,255,255,0.06);
+    color:#fff;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    transition:background 0.15s, border-color 0.15s;
+    white-space:nowrap;
+  }
+  .btn:hover{background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.35);}
+  .btn:disabled{opacity:0.35; cursor:not-allowed;}
+  .btn-primary{
+    background:var(--amber);
+    border-color:var(--amber);
+    color:#1a1305;
+    font-weight:600;
+  }
+  .btn-primary:hover{background:#d68f38;}
+  .btn svg{width:15px;height:15px; flex-shrink:0;}
+
+  /* ---------- Landing / input screen ---------- */
+  .stage{
+    flex:1;
+    display:flex;
+    overflow:hidden;
+    position:relative;
+  }
+  .intro{
+    flex:1;
+    display:flex;
+    align-items:flex-start;
+    justify-content:center;
+    padding:48px 24px;
+    overflow-y:auto;
+  }
+  .intro-inner{
+    max-width:980px;
+    width:100%;
+  }
+  .intro-head{
+    margin-bottom:28px;
+    text-align:center;
+  }
+  .intro-head h1{
+    font-size:28px;
+    margin:0 0 8px;
+    font-weight:700;
+    letter-spacing:-0.3px;
+  }
+  .intro-head p{
+    color:var(--ink-soft);
+    font-size:14.5px;
+    margin:0;
+  }
+  .input-grid{
+    display:grid;
+    grid-template-columns:1fr auto 1fr;
+    gap:0;
+    align-items:stretch;
+  }
+  .input-col{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:8px;
+    display:flex;
+    flex-direction:column;
+    min-height:420px;
+  }
+  .input-col.left{border-top:3px solid var(--removed-border);}
+  .input-col.right{border-top:3px solid var(--added-border);}
+  .input-col-head{
+    padding:14px 16px 10px;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+  }
+  .input-col-head .tag{
+    font-family:var(--mono);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    color:var(--ink-soft);
+    font-weight:600;
+  }
+  .input-col.left .tag{color:var(--removed-text);}
+  .input-col.right .tag{color:var(--added-text);}
+  .filename{
+    font-size:12px;
+    color:var(--ink-soft);
+    font-family:var(--mono);
+    max-width:180px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .dropzone{
+    margin:12px 16px 0;
+    border:1.5px dashed var(--line-strong);
+    border-radius:6px;
+    padding:16px;
+    text-align:center;
+    cursor:pointer;
+    color:var(--ink-soft);
+    font-size:12.5px;
+    transition:border-color 0.15s, background 0.15s;
+  }
+  .dropzone:hover, .dropzone.dragover{
+    border-color:var(--accent);
+    background:var(--accent-soft);
+  }
+  .dropzone strong{color:var(--accent); font-weight:600;}
+  textarea.paste-area{
+    flex:1;
+    margin:12px 16px 16px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:12px;
+    font-family:var(--mono);
+    font-size:12.5px;
+    line-height:1.6;
+    resize:none;
+    color:var(--ink);
+    background:#fdfdfc;
+  }
+  textarea.paste-area:focus{outline:none; border-color:var(--accent);}
+  .vs-divider{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0 18px;
+    font-family:var(--mono);
+    font-size:12px;
+    font-weight:600;
+    color:var(--ink-soft);
+  }
+  .intro-controls{
+    margin-top:24px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:16px;
+    flex-wrap:wrap;
+  }
+  .opt-group{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:13px;
+    color:var(--ink-soft);
+    background:var(--panel);
+    border:1px solid var(--line);
+    padding:6px 12px;
+    border-radius:6px;
+  }
+  .opt-group select{
+    font-family:var(--sans);
+    font-size:13px;
+    border:none;
+    background:transparent;
+    color:var(--ink);
+    font-weight:600;
+    cursor:pointer;
+  }
+  .opt-group select:focus{outline:none;}
+  .compare-cta{
+    margin-top:22px;
+    display:flex;
+    justify-content:center;
+  }
+  .compare-cta .btn-primary{
+    padding:12px 32px;
+    font-size:14.5px;
+    border-radius:6px;
+  }
+  .err-msg{
+    text-align:center;
+    color:var(--removed-text);
+    font-size:12.5px;
+    margin-top:10px;
+    min-height:16px;
+  }
+
+  .server-settings{margin-top:28px; max-width:600px; margin-left:auto; margin-right:auto;}
+  .server-toggle{
+    display:flex; align-items:center; gap:6px;
+    background:none; border:none; cursor:pointer;
+    font-family:var(--sans); font-size:12.5px; color:var(--ink-soft);
+    padding:6px 0; margin:0 auto;
+  }
+  .server-toggle:hover{color:var(--accent);}
+  .server-toggle svg{width:14px; height:14px;}
+  .server-panel{
+    margin-top:8px; padding:14px 16px; background:var(--panel);
+    border:1px solid var(--line); border-radius:8px;
+  }
+  .server-panel p{font-size:12.5px; color:var(--ink-soft); margin:0 0 10px; line-height:1.6;}
+  .server-input-row{display:flex; gap:8px;}
+  .server-input-row input{
+    flex:1; font-family:var(--mono); font-size:12.5px;
+    padding:7px 10px; border:1px solid var(--line); border-radius:5px; color:var(--ink);
+  }
+  .server-input-row input:focus{outline:none; border-color:var(--accent);}
+  .server-status{font-size:12px; margin-top:8px; min-height:16px;}
+  .server-status.ok{color:var(--added-text);}
+  .server-status.err{color:var(--removed-text);}
+
+  /* ---------- Result view ---------- */
+  .result{
+    flex:1;
+    display:none;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  .result.active{display:flex;}
+  .intro.hidden{display:none;}
+
+  .toolstrip{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:8px 20px;
+    background:var(--panel);
+    border-bottom:1px solid var(--line);
+    flex-shrink:0;
+    gap:16px;
+  }
+  .toolstrip-group{display:flex; align-items:center; gap:8px;}
+  .nav-btn{
+    width:30px;height:30px;
+    border-radius:5px;
+    border:1px solid var(--line);
+    background:#fff;
+    color:var(--ink);
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    transition:background 0.15s;
+  }
+  .nav-btn:hover{background:var(--paper);}
+  .nav-btn:disabled{opacity:0.3; cursor:not-allowed;}
+  .change-counter{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--ink-soft);
+    padding:0 4px;
+    min-width:90px;
+    text-align:center;
+  }
+  .change-counter b{color:var(--ink);}
+  .view-toggle{
+    display:flex;
+    border:1px solid var(--line);
+    border-radius:5px;
+    overflow:hidden;
+  }
+  .view-toggle button{
+    font-family:var(--sans);
+    font-size:12.5px;
+    font-weight:500;
+    padding:6px 12px;
+    border:none;
+    background:#fff;
+    color:var(--ink-soft);
+    cursor:pointer;
+    border-right:1px solid var(--line);
+  }
+  .view-toggle button:last-child{border-right:none;}
+  .view-toggle button.active{background:var(--ink); color:#fff;}
+  .stat-pill{
+    font-family:var(--mono);
+    font-size:11.5px;
+    padding:4px 9px;
+    border-radius:20px;
+    font-weight:600;
+    display:flex;
+    align-items:center;
+    gap:5px;
+  }
+  .stat-pill.rem{background:var(--removed-bg); color:var(--removed-text);}
+  .stat-pill.add{background:var(--added-bg); color:var(--added-text);}
+
+  .panes{
+    flex:1;
+    display:flex;
+    overflow:hidden;
+    position:relative;
+  }
+  .pane{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+    min-width:0;
+  }
+  .single-pane .pane-head{color:var(--ink-soft);}
+  .single-pane{
+    flex:1;
+    width:100%;
+  }
+  .pane-head{
+    padding:8px 18px;
+    background:var(--panel);
+    border-bottom:1px solid var(--line);
+    font-family:var(--mono);
+    font-size:11.5px;
+    color:var(--ink-soft);
+    text-transform:uppercase;
+    letter-spacing:0.6px;
+    font-weight:600;
+    flex-shrink:0;
+  }
+  .pane.left .pane-head{color:var(--removed-text);}
+  .pane.right .pane-head{color:var(--added-text);}
+  .pane-scroll{
+    flex:1;
+    overflow:auto;
+    background:#fdfdfc;
+  }
+  .doc-body{
+    padding:20px 26px 60px;
+    font-family:var(--mono);
+    font-size:13px;
+    line-height:1.85;
+    white-space:pre-wrap;
+    word-break:break-word;
+  }
+  .doc-line{
+    display:flex;
+    min-height:1.85em;
+  }
+  .doc-line .ln{
+    flex-shrink:0;
+    width:42px;
+    color:#b8b5ac;
+    user-select:none;
+    text-align:right;
+    padding-right:14px;
+    font-size:11.5px;
+  }
+  .doc-line .content{flex:1; min-width:0;}
+  .doc-line.changed-line{background:rgba(0,0,0,0.015);}
+  .doc-line.jump-target{outline:2px solid var(--amber); outline-offset:-2px; border-radius:2px;}
+
+  mark.diff-del{
+    background:var(--removed-bg);
+    color:var(--removed-text);
+    text-decoration:line-through;
+    text-decoration-thickness:1.5px;
+    border-radius:2px;
+    padding:0 1px;
+  }
+  mark.diff-add{
+    background:var(--added-bg);
+    color:var(--added-text);
+    border-radius:2px;
+    padding:0 1px;
+    font-weight:500;
+  }
+
+  .gutter{
+    width:34px;
+    flex-shrink:0;
+    background:var(--panel);
+    border-left:1px solid var(--line);
+    border-right:1px solid var(--line);
+    position:relative;
+    overflow:hidden;
+  }
+  .gutter-marks{position:absolute; inset:0;}
+  .gutter-mark{
+    position:absolute;
+    left:6px;
+    right:6px;
+    border-radius:2px;
+    cursor:pointer;
+    min-height:2px;
+  }
+  .gutter-mark.rem{background:var(--removed-border);}
+  .gutter-mark.add{background:var(--added-border);}
+  .gutter-mark.mod{background:var(--amber);}
+  .gutter-viewport{
+    position:absolute;
+    left:0; right:0;
+    background:rgba(58,90,122,0.08);
+    border-top:1px solid var(--accent);
+    border-bottom:1px solid var(--accent);
+    pointer-events:none;
+  }
+
+  .empty-state{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    height:100%;
+    color:var(--ink-soft);
+    font-size:13px;
+    flex-direction:column;
+    gap:6px;
+  }
+  .empty-state svg{width:36px;height:36px; opacity:0.4; margin-bottom:6px;}
+
+  .loading-overlay{
+    position:absolute;
+    inset:0;
+    background:rgba(247,246,243,0.92);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    gap:10px;
+    z-index:10;
+  }
+  .loading-overlay.active{display:flex;}
+  .spinner{
+    width:28px;height:28px;
+    border:3px solid var(--line);
+    border-top-color:var(--accent);
+    border-radius:50%;
+    animation:spin 0.7s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .loading-overlay span{font-size:13px; color:var(--ink-soft); font-family:var(--mono);}
+
+  ::-webkit-scrollbar{width:10px; height:10px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:var(--line-strong); border-radius:5px;}
+  ::-webkit-scrollbar-thumb:hover{background:#a8a49a;}
+
+  @media (max-width: 860px){
+    .input-grid{grid-template-columns:1fr;}
+    .vs-divider{padding:10px 0;}
+    .panes{flex-direction:column;}
+    .gutter{display:none;}
+    .docx-panes{flex-direction:column;}
+    .pdf-page-row{flex-direction:column;}
+    .slide-cols{flex-direction:column;}
+  }
+
+  /* ---------- Rich (formatted) results ---------- */
+  .rich-result{
+    flex:1;
+    display:none;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  .rich-body{
+    flex:1;
+    overflow:auto;
+    background:#fdfdfc;
+    padding:20px 26px 60px;
+  }
+  .docx-toolbar{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:10px 20px;
+    background:var(--panel);
+    border-bottom:1px solid var(--line);
+    flex-wrap:wrap;
+    flex-shrink:0;
+  }
+  .rich-label{
+    font-size:13px;
+    color:var(--ink-soft);
+    font-weight:500;
+    margin-right:auto;
+  }
+  .btn-small{
+    font-family:var(--sans);
+    font-size:12.5px;
+    font-weight:500;
+    padding:5px 12px;
+    border-radius:5px;
+    border:1px solid var(--line);
+    background:#fff;
+    color:var(--accent);
+    cursor:pointer;
+  }
+  .btn-small:hover{background:var(--accent-soft);}
+
+  /* docx */
+  .docx-panes{display:flex; gap:20px; max-width:1400px; margin:0 auto;}
+  .docx-pane{flex:1; min-width:0; background:#fff; border:1px solid var(--line); border-radius:8px; overflow:hidden; align-self:flex-start;}
+  .docx-pane-head{
+    padding:10px 16px;
+    font-family:var(--mono);
+    font-size:11.5px;
+    text-transform:uppercase;
+    letter-spacing:0.6px;
+    color:var(--ink-soft);
+    font-weight:600;
+    border-bottom:1px solid var(--line);
+    background:var(--paper);
+  }
+  .docx-pane-body{padding:22px 26px; font-size:14.5px; line-height:1.7;}
+  .docx-pane-body img{max-width:100%;}
+  .docx-pane-body table{border-collapse:collapse; margin:10px 0;}
+  .docx-pane-body td, .docx-pane-body th{border:1px solid var(--line-strong); padding:4px 8px;}
+  .removed-para{background:var(--removed-bg); border-left:3px solid var(--removed-border); padding-left:10px; margin-left:-13px; border-radius:0 4px 4px 0;}
+  .added-para{background:var(--added-bg); border-left:3px solid var(--added-border); padding-left:10px; margin-left:-13px; border-radius:0 4px 4px 0;}
+
+  /* pptx */
+  .pptx-list{display:flex; flex-direction:column; gap:16px; max-width:1100px; margin:0 auto;}
+  .slide-card{background:#fff; border:1px solid var(--line); border-radius:8px; overflow:hidden;}
+  .slide-card.slide-changed{border-color:var(--amber);}
+  .slide-card-head{
+    padding:9px 16px;
+    font-family:var(--mono);
+    font-size:12px;
+    font-weight:600;
+    color:var(--ink);
+    background:var(--paper);
+    border-bottom:1px solid var(--line);
+  }
+  .tag-missing{color:var(--removed-text); font-weight:500; font-size:11px; margin-left:8px;}
+  .slide-section{padding:12px 16px; font-size:13px; line-height:1.7; font-family:var(--mono);}
+  .slide-notes-section{border-top:1px solid var(--line); background:var(--paper);}
+  .slide-col-label{font-size:10.5px; text-transform:uppercase; letter-spacing:0.6px; color:var(--ink-soft); font-weight:600; margin-bottom:6px;}
+  .diffline-row{padding:1px 0; word-break:break-word;}
+  .diffline-row.changed-line{background:rgba(0,0,0,0.02);}
+  .diffline-empty{color:var(--ink-soft); font-style:italic;}
+  .slide-thumbs-row{display:flex; gap:16px;}
+  .slide-thumbs{flex:1; display:flex; flex-wrap:wrap; gap:8px;}
+  .slide-thumb{max-width:140px; max-height:100px; border:1px solid var(--line-strong); border-radius:4px; object-fit:contain; background:#fff;}
+
+  /* xlsx */
+  .sheet-tabs{display:flex; gap:4px; padding:10px 20px 0; background:var(--panel); border-bottom:1px solid var(--line); flex-shrink:0; overflow-x:auto;}
+  .sheet-tab{
+    font-family:var(--sans);
+    font-size:12.5px;
+    font-weight:500;
+    padding:7px 14px;
+    border:1px solid var(--line);
+    border-bottom:none;
+    border-radius:6px 6px 0 0;
+    background:var(--paper);
+    color:var(--ink-soft);
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .sheet-tab.active{background:#fff; color:var(--ink); font-weight:600;}
+  .sheet-panels{background:#fff;}
+  .sheet-panel{overflow:auto;}
+  .diff-table{border-collapse:collapse; font-family:var(--mono); font-size:12px;}
+  .diff-table td{border:1px solid var(--line); padding:4px 10px; white-space:nowrap;}
+  .diff-table td.cell-mod{background:#fdf1de; color:var(--amber); font-weight:600;}
+  .diff-table td.cell-rem{background:var(--removed-bg); color:var(--removed-text); text-decoration:line-through;}
+  .diff-table td.cell-add{background:var(--added-bg); color:var(--added-text); font-weight:600;}
+
+  /* pdf */
+  .pdf-pages{display:flex; flex-direction:column; gap:24px; max-width:1200px; margin:0 auto;}
+  .pdf-page-row{display:flex; gap:16px;}
+  .pdf-page-col{flex:1; min-width:0;}
+  .pdf-page-label{font-family:var(--mono); font-size:11px; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;}
+  .pdf-page-col img{width:100%; border:1px solid var(--line); border-radius:4px; display:block;}
+  .pdf-page-frame{position:relative; border:1px solid var(--line); border-radius:4px; overflow:hidden; width:100%;}
+  .pdf-page-frame img{width:100%; height:100%; display:block; border:none; border-radius:0; object-fit:fill;}
+  .pdf-hl{position:absolute; border-radius:2px; pointer-events:none;}
+  .pdf-hl-rem{background:rgba(232,165,165,0.55); outline:1px solid rgba(138,44,44,0.35);}
+  .pdf-hl-add{background:rgba(169,199,230,0.55); outline:1px solid rgba(31,78,121,0.35);}
+  .pdf-missing{border:1px dashed var(--line-strong); border-radius:4px; padding:40px; text-align:center; color:var(--ink-soft); font-size:12px;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="mark"></div>
+    <span>DiffChecker</span>
+  </div>
+  <div class="topbar-actions" id="topActions">
+    <button class="btn" id="newCompareBtn" style="display:none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      New comparison
+    </button>
+    <button class="btn" id="swapBtn" style="display:none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4-4 4M3 7h18M7 21l-4-4 4-4M21 17H3"/></svg>
+      Swap sides
+    </button>
+    <button class="btn btn-primary" id="downloadBtn" style="display:none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+      Export report
+    </button>
+  </div>
+</div>
+
+<div class="stage">
+
+  <!-- INPUT SCREEN -->
+  <div class="intro" id="introScreen">
+    <div class="intro-inner">
+      <div class="intro-head">
+        <h1>Compare two documents</h1>
+        <p>Paste text or attach a file on each side — Word, PDF, PowerPoint, Excel/CSV, or plain text. Same-type files are shown with real formatting and highlighted differences; different types are each shown in their own native format side by side, since there's no shared layout to diff across formats.</p>
+      </div>
+
+      <div class="input-grid">
+        <div class="input-col left">
+          <div class="input-col-head">
+            <span class="tag">Original</span>
+            <span class="filename" id="fileNameLeft"></span>
+          </div>
+          <div class="dropzone" id="dropLeft">
+            <span><strong>Attach a file</strong> or drag it here</span>
+            <input type="file" id="fileLeft" accept=".docx,.pdf,.pptx,.txt,.csv,.xlsx,.xls,.md" style="display:none;">
+          </div>
+          <textarea class="paste-area" id="textLeft" placeholder="…or paste the original text here"></textarea>
+        </div>
+
+        <div class="vs-divider">VS</div>
+
+        <div class="input-col right">
+          <div class="input-col-head">
+            <span class="tag">Revised</span>
+            <span class="filename" id="fileNameRight"></span>
+          </div>
+          <div class="dropzone" id="dropRight">
+            <span><strong>Attach a file</strong> or drag it here</span>
+            <input type="file" id="fileRight" accept=".docx,.pdf,.pptx,.txt,.csv,.xlsx,.xls,.md" style="display:none;">
+          </div>
+          <textarea class="paste-area" id="textRight" placeholder="…or paste the revised text here"></textarea>
+        </div>
+      </div>
+
+      <div class="intro-controls">
+        <div class="opt-group">
+          Compare by
+          <select id="granularity">
+            <option value="word">Word-level</option>
+            <option value="line">Line-level</option>
+            <option value="both" selected>Both (line + word)</option>
+          </select>
+        </div>
+        <div class="opt-group">
+          Ignore
+          <select id="ignoreOpts">
+            <option value="none">Nothing</option>
+            <option value="whitespace">Extra whitespace</option>
+            <option value="case">Whitespace + case</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="compare-cta">
+        <button class="btn btn-primary" id="compareBtn">Compare documents</button>
+      </div>
+      <div class="err-msg" id="errMsg"></div>
+
+      <div class="server-settings">
+        <button class="server-toggle" id="serverToggle" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          Conversion server settings
+        </button>
+        <div class="server-panel" id="serverPanel" style="display:none;">
+          <p>Optional. For true highlighted comparison across <em>different</em> file types (e.g. Word vs PowerPoint), point this at a running <a href="#" onclick="return false;">DiffChecker convert server</a>. Leave blank to use the built-in browser-only comparison.</p>
+          <div class="server-input-row">
+            <input type="text" id="serverUrlInput" placeholder="https://your-service.onrender.com">
+            <button class="btn-small" id="serverSaveBtn">Save</button>
+            <button class="btn-small" id="serverTestBtn">Test</button>
+          </div>
+          <div class="server-status" id="serverStatus"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RESULT SCREEN -->
+  <div class="result" id="resultScreen">
+    <div class="toolstrip">
+      <div class="toolstrip-group">
+        <button class="nav-btn" id="prevChange" title="Previous change">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 15l-6-6-6 6"/></svg>
+        </button>
+        <button class="nav-btn" id="nextChange" title="Next change">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <span class="change-counter"><b id="curChange">0</b> of <b id="totalChanges">0</b> changes</span>
+      </div>
+      <div class="toolstrip-group">
+        <span class="stat-pill rem" id="remStat">0 removed</span>
+        <span class="stat-pill add" id="addStat">0 added</span>
+      </div>
+      <div class="toolstrip-group">
+        <div class="view-toggle">
+          <button id="viewSide" class="active">Side by side</button>
+          <button id="viewSingle">Single view</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panes" id="panesWrap">
+      <div class="pane left">
+        <div class="pane-head" id="headLeft">Original</div>
+        <div class="pane-scroll" id="scrollLeft">
+          <div class="doc-body" id="docLeft"></div>
+        </div>
+      </div>
+      <div class="gutter" id="gutter">
+        <div class="gutter-marks" id="gutterMarks"></div>
+      </div>
+      <div class="pane right">
+        <div class="pane-head" id="headRight">Revised</div>
+        <div class="pane-scroll" id="scrollRight">
+          <div class="doc-body" id="docRight"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pane single-pane" id="singlePane" style="display:none;">
+      <div class="pane-head" id="headSingle">Combined view — removals struck through, additions highlighted</div>
+      <div class="pane-scroll" id="scrollSingle">
+        <div class="doc-body" id="docSingle"></div>
+      </div>
+    </div>
+
+    <div class="rich-result" id="richResult">
+      <div class="rich-body" id="richBody"></div>
+    </div>
+  </div>
+
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <span id="loadingText">Reading file…</span>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+  const el = id => document.getElementById(id);
+  const introScreen = el('introScreen');
+  const resultScreen = el('resultScreen');
+  const errMsg = el('errMsg');
+  const loadingOverlay = el('loadingOverlay');
+  const loadingText = el('loadingText');
+
+  let fileTextLeft = null, fileTextRight = null;
+  let fileNameL = '', fileNameR = '';
+  let lastDiffData = null;
+  let currentView = 'side';
+  let currentMode = 'text';
+  let changeList = []; // list of {index}
+  let currentChangeIdx = -1;
+  const docMeta = { left: null, right: null }; // {type, buf}
+
+  function showLoading(msg){ loadingText.textContent = msg || 'Working…'; loadingOverlay.classList.add('active'); }
+  function hideLoading(){ loadingOverlay.classList.remove('active'); }
+  function showErr(msg){ errMsg.textContent = msg || ''; }
+
+  function typeFromExt(ext){
+    if(ext === 'docx') return 'docx';
+    if(ext === 'pptx') return 'pptx';
+    if(ext === 'pdf') return 'pdf';
+    if(ext === 'xlsx' || ext === 'xls') return 'xlsx';
+    return 'text';
+  }
+
+  // ---------- File extraction (plain text, used for the textarea + fallback diff) ----------
+  async function extractTextForType(type, buf){
+    if(type === 'docx'){
+      const res = await mammoth.extractRawText({arrayBuffer: buf});
+      return res.value;
+    } else if(type === 'pdf'){
+      return await extractPdfText(buf);
+    } else if(type === 'xlsx'){
+      const wb = XLSX.read(buf, {type:'array'});
+      let text = '';
+      wb.SheetNames.forEach(name => {
+        text += '--- ' + name + ' ---\n';
+        text += XLSX.utils.sheet_to_csv(wb.Sheets[name]) + '\n\n';
+      });
+      return text;
+    } else if(type === 'pptx'){
+      const slides = await parsePptxSlides(buf);
+      let text = '';
+      slides.forEach(s => {
+        text += 'Slide ' + s.number + ':\n' + s.blocks.join('\n') + '\n';
+        if(s.notes.length) text += 'Notes: ' + s.notes.join(' ') + '\n';
+        text += '\n';
+      });
+      return text;
+    } else {
+      return new TextDecoder('utf-8').decode(buf);
+    }
+  }
+
+  async function extractPdfText(buf){
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+    let text = '';
+    for(let i=1;i<=pdf.numPages;i++){
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(it => it.str).join(' ') + '\n\n';
+    }
+    return text;
+  }
+
+  function setupDrop(dropEl, inputEl, isLeft){
+    dropEl.addEventListener('click', () => inputEl.click());
+    dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('dragover'); });
+    dropEl.addEventListener('dragleave', () => dropEl.classList.remove('dragover'));
+    dropEl.addEventListener('drop', async e => {
+      e.preventDefault(); dropEl.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if(file) await handleFile(file, isLeft);
+    });
+    inputEl.addEventListener('change', async e => {
+      const file = e.target.files[0];
+      if(file) await handleFile(file, isLeft);
+    });
+  }
+
+  async function handleFile(file, isLeft){
+    try{
+      showLoading('Reading ' + file.name + '…');
+      const ext = file.name.split('.').pop().toLowerCase();
+      const type = typeFromExt(ext);
+      const buf = await file.arrayBuffer();
+      const text = await extractTextForType(type, buf.slice(0));
+      if(isLeft){
+        docMeta.left = {type, buf};
+        fileTextLeft = text; fileNameL = file.name;
+        el('fileNameLeft').textContent = file.name;
+        el('textLeft').value = text;
+      } else {
+        docMeta.right = {type, buf};
+        fileTextRight = text; fileNameR = file.name;
+        el('fileNameRight').textContent = file.name;
+        el('textRight').value = text;
+      }
+      showErr('');
+    } catch(err){
+      console.error(err);
+      showErr('Could not read "' + file.name + '". Try pasting the text instead.');
+    } finally {
+      hideLoading();
+    }
+  }
+
+  setupDrop(el('dropLeft'), el('fileLeft'), true);
+  setupDrop(el('dropRight'), el('fileRight'), false);
+
+  // ---------- Server settings panel ----------
+  el('serverUrlInput').value = getServerUrl();
+  el('serverToggle').addEventListener('click', () => {
+    const panel = el('serverPanel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  });
+  el('serverSaveBtn').addEventListener('click', () => {
+    setServerUrl(el('serverUrlInput').value);
+    const status = el('serverStatus');
+    status.textContent = 'Saved.';
+    status.className = 'server-status ok';
+  });
+  el('serverTestBtn').addEventListener('click', async () => {
+    const url = el('serverUrlInput').value.trim();
+    const status = el('serverStatus');
+    if(!url){ status.textContent = 'Enter a server URL first.'; status.className = 'server-status err'; return; }
+    status.textContent = 'Checking…'; status.className = 'server-status';
+    try{
+      const resp = await fetch(url.replace(/\/$/, '') + '/health', { method: 'GET' });
+      if(resp.ok){ status.textContent = 'Server reachable.'; status.className = 'server-status ok'; }
+      else{ status.textContent = 'Server responded with an error (HTTP ' + resp.status + ').'; status.className = 'server-status err'; }
+    } catch(err){
+      status.textContent = 'Could not reach server: ' + err.message;
+      status.className = 'server-status err';
+    }
+  });
+
+  function detectMode(){
+    const leftIsFile = docMeta.left && el('textLeft').value === fileTextLeft;
+    const rightIsFile = docMeta.right && el('textRight').value === fileTextRight;
+    const lt = leftIsFile ? docMeta.left.type : 'text';
+    const rt = rightIsFile ? docMeta.right.type : 'text';
+    if(lt === rt && lt !== 'text') return lt;
+    if(lt !== 'text' && rt !== 'text' && lt !== rt) return 'mixed';
+    return 'text';
+  }
+
+  // ---------- Diff engine ----------
+  function preprocess(text, ignoreOpts){
+    if(ignoreOpts === 'whitespace'){
+      return text.split('\n').map(l => l.trim().replace(/\s+/g,' ')).join('\n');
+    }
+    if(ignoreOpts === 'case'){
+      return text.split('\n').map(l => l.trim().replace(/\s+/g,' ').toLowerCase()).join('\n');
+    }
+    return text;
+  }
+
+  function runTextCompare(rawLeftIn, rawRightIn){
+    const rawLeft = rawLeftIn !== undefined ? rawLeftIn : el('textLeft').value;
+    const rawRight = rawRightIn !== undefined ? rawRightIn : el('textRight').value;
+
+    const ignoreOpts = el('ignoreOpts').value;
+    const granularity = el('granularity').value;
+
+    const cmpLeft = preprocess(rawLeft, ignoreOpts);
+    const cmpRight = preprocess(rawRight, ignoreOpts);
+
+    const {leftLines, rightLines} = computeLineWordDiff(cmpLeft, cmpRight, granularity);
+
+    lastDiffData = {leftLines, rightLines, rawLeft, rawRight};
+    renderResult();
+  }
+
+  // pure diff builder — reused by text mode and by pptx slide/notes comparison
+  function computeLineWordDiff(rawLeft, rawRight, granularity){
+    const lineDiff = Diff.diffLines(rawLeft, rawRight);
+    const leftLines = [];
+    const rightLines = [];
+
+    let i = 0;
+    while(i < lineDiff.length){
+      const part = lineDiff[i];
+      if(!part.added && !part.removed){
+        const lines = part.value.split('\n');
+        if(lines[lines.length-1] === '') lines.pop();
+        lines.forEach(l => {
+          leftLines.push({type:'same', text:l});
+          rightLines.push({type:'same', text:l});
+        });
+        i++;
+      } else if(part.removed && lineDiff[i+1] && lineDiff[i+1].added){
+        const remLines = part.value.split('\n'); if(remLines[remLines.length-1]==='') remLines.pop();
+        const addLines = lineDiff[i+1].value.split('\n'); if(addLines[addLines.length-1]==='') addLines.pop();
+
+        if(granularity === 'line'){
+          remLines.forEach(l => leftLines.push({type:'removed', text:l}));
+          addLines.forEach(l => rightLines.push({type:'added', text:l}));
+        } else {
+          const maxLen = Math.max(remLines.length, addLines.length);
+          for(let k=0;k<maxLen;k++){
+            const lt = remLines[k] !== undefined ? remLines[k] : null;
+            const rt = addLines[k] !== undefined ? addLines[k] : null;
+            if(lt !== null && rt !== null){
+              const wd = Diff.diffWords(lt, rt);
+              leftLines.push({type:'changed', text:lt, wordDiff:wd, side:'left'});
+              rightLines.push({type:'changed', text:rt, wordDiff:wd, side:'right'});
+            } else if(lt !== null){
+              leftLines.push({type:'removed', text:lt});
+            } else if(rt !== null){
+              rightLines.push({type:'added', text:rt});
+            }
+          }
+        }
+        i += 2;
+      } else if(part.removed){
+        const remLines = part.value.split('\n'); if(remLines[remLines.length-1]==='') remLines.pop();
+        remLines.forEach(l => leftLines.push({type:'removed', text:l}));
+        i++;
+      } else if(part.added){
+        const addLines = part.value.split('\n'); if(addLines[addLines.length-1]==='') addLines.pop();
+        addLines.forEach(l => rightLines.push({type:'added', text:l}));
+        i++;
+      }
+    }
+    return {leftLines, rightLines};
+  }
+
+  function statsFromLines(leftLines, rightLines){
+    let rem = 0, add = 0;
+    const maxLen = Math.max(leftLines.length, rightLines.length);
+    for(let idx=0; idx<maxLen; idx++){
+      const l = leftLines[idx]; const r = rightLines[idx];
+      if(l && l.type === 'removed') rem += countWords(l.text);
+      if(r && r.type === 'added') add += countWords(r.text);
+      if(l && l.type === 'changed' && l.wordDiff){
+        l.wordDiff.forEach(p => {
+          if(p.removed) rem += countWords(p.value);
+          if(p.added) add += countWords(p.value);
+        });
+      }
+    }
+    return {rem, add};
+  }
+
+  function unifiedHtmlFromLines(leftLines, rightLines){
+    const maxLen = Math.max(leftLines.length, rightLines.length);
+    let html = '';
+    for(let idx=0; idx<maxLen; idx++){
+      const l = leftLines[idx]; const r = rightLines[idx];
+      const changed = (l && l.type !== 'same') || (r && r.type !== 'same');
+      const cls = 'diffline-row' + (changed ? ' changed-line' : '');
+      if(l && l.type === 'changed'){
+        html += '<div class="'+cls+'">' + renderWordDiffUnified(l.wordDiff) + '</div>';
+      } else {
+        if(l && l.type === 'removed') html += '<div class="'+cls+'"><mark class="diff-del">'+(escapeHtml(l.text)||' ')+'</mark></div>';
+        if(r && r.type === 'added') html += '<div class="'+cls+'"><mark class="diff-add">'+(escapeHtml(r.text)||' ')+'</mark></div>';
+        if(l && l.type === 'same') html += '<div class="'+cls+'">'+(escapeHtml(l.text)||'&nbsp;')+'</div>';
+      }
+    }
+    if(!html) html = '<div class="diffline-row diffline-empty">No content</div>';
+    return html;
+  }
+
+  function countWords(str){
+    if(!str) return 0;
+    const t = str.trim();
+    return t ? t.split(/\s+/).length : 0;
+  }
+
+  // ---------- Rich-format parsing ----------
+  function mammothImgOpts(){
+    return { convertImage: mammoth.images.imgElement(function(image){
+      return image.read('base64').then(function(imageBuffer){
+        return { src: 'data:' + image.contentType + ';base64,' + imageBuffer };
+      });
+    })};
+  }
+
+  function resolveZipPath(baseDir, target){
+    // resolves a relative target (e.g. "../notesSlides/notesSlide1.xml") against a
+    // base directory that already IS the containing folder (e.g. "ppt/slides/")
+    if(target.startsWith('/')) return target.slice(1);
+    const stack = baseDir.split('/').filter(Boolean);
+    target.split('/').forEach(part => {
+      if(part === '..') stack.pop();
+      else if(part === '.' || part === '') { /* skip */ }
+      else stack.push(part);
+    });
+    return stack.join('/');
+  }
+
+  const IMAGE_EXT_MIME = {png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', bmp:'image/bmp', emf:'', wmf:''};
+
+  async function parsePptxSlides(buf){
+    const zip = await JSZip.loadAsync(buf);
+    const parseXml = async (path) => {
+      if(!zip.file(path)) return null;
+      const text = await zip.file(path).async('string');
+      return new DOMParser().parseFromString(text, 'application/xml');
+    };
+
+    // 1. Determine the TRUE display order of slides via presentation.xml + its rels
+    //    (slide files are numbered by creation order, not display order — after
+    //    reordering or deleting slides, e.g. slide23.xml, these no longer match).
+    const presDoc = await parseXml('ppt/presentation.xml');
+    const presRelsDoc = await parseXml('ppt/_rels/presentation.xml.rels');
+    const relIdToTarget = {};
+    if(presRelsDoc){
+      Array.from(presRelsDoc.getElementsByTagName('Relationship')).forEach(r => {
+        relIdToTarget[r.getAttribute('Id')] = r.getAttribute('Target');
+      });
+    }
+    let slidePaths = [];
+    if(presDoc){
+      const sldIds = Array.from(presDoc.getElementsByTagName('p:sldId'));
+      slidePaths = sldIds.map(node => {
+        const rid = node.getAttribute('r:id');
+        const target = relIdToTarget[rid];
+        return target ? resolveZipPath('ppt/', target) : null;
+      }).filter(Boolean);
+    }
+    if(slidePaths.length === 0){
+      // fallback: sort by internal file number if presentation.xml couldn't be parsed
+      slidePaths = Object.keys(zip.files)
+        .filter(p => /^ppt\/slides\/slide\d+\.xml$/.test(p))
+        .sort((a,b) => parseInt(a.match(/slide(\d+)\.xml/)[1],10) - parseInt(b.match(/slide(\d+)\.xml/)[1],10));
+    }
+
+    const slides = [];
+    let displayIndex = 0;
+    for(const path of slidePaths){
+      displayIndex++;
+      const doc = await parseXml(path);
+      if(!doc){ slides.push({number: displayIndex, blocks: [], notes: [], images: []}); continue; }
+
+      const paras = Array.from(doc.getElementsByTagName('a:p'));
+      const blocks = paras
+        .map(p => Array.from(p.getElementsByTagName('a:t')).map(t => t.textContent).join(''))
+        .filter(t => t.trim() !== '');
+
+      // resolve this slide's own relationships (notes + images) via its .rels file
+      const slideFileName = path.split('/').pop();
+      const relsPath = 'ppt/slides/_rels/' + slideFileName + '.rels';
+      const relsDoc = await parseXml(relsPath);
+      let notesPath = null;
+      const imagePaths = [];
+      if(relsDoc){
+        Array.from(relsDoc.getElementsByTagName('Relationship')).forEach(r => {
+          const type = r.getAttribute('Type') || '';
+          const target = r.getAttribute('Target') || '';
+          if(/\/notesSlide$/.test(type)){
+            notesPath = resolveZipPath('ppt/slides/', target);
+          } else if(/\/image$/.test(type)){
+            imagePaths.push(resolveZipPath('ppt/slides/', target));
+          }
+        });
+      }
+
+      // notes
+      let notes = [];
+      const ndoc = notesPath ? await parseXml(notesPath) : null;
+      if(ndoc){
+        const shapes = Array.from(ndoc.getElementsByTagName('p:sp'));
+        shapes.forEach(sp => {
+          const ph = sp.getElementsByTagName('p:ph')[0];
+          const phType = ph ? ph.getAttribute('type') : null;
+          if(phType === 'sldNum' || phType === 'ftr' || phType === 'dt') return;
+          const ps = Array.from(sp.getElementsByTagName('a:p'));
+          ps.forEach(p => {
+            const t = Array.from(p.getElementsByTagName('a:t')).map(x => x.textContent).join('');
+            if(t.trim() !== '') notes.push(t);
+          });
+        });
+      }
+
+      // images actually placed on this slide
+      const images = [];
+      for(const imgPath of imagePaths){
+        const file = zip.file(imgPath);
+        if(!file) continue;
+        const ext = imgPath.split('.').pop().toLowerCase();
+        const mime = IMAGE_EXT_MIME[ext];
+        if(!mime) continue; // skip unsupported formats (emf/wmf vector metafiles browsers can't render)
+        try{
+          const base64 = await file.async('base64');
+          images.push('data:' + mime + ';base64,' + base64);
+        } catch(e) { /* skip unreadable image */ }
+      }
+
+      slides.push({number: displayIndex, blocks, notes, images});
+    }
+    return slides;
+  }
+
+  function computeParaDiff(leftTexts, rightTexts){
+    const parts = Diff.diffArrays(leftTexts, rightTexts);
+    const leftFlags = []; const rightFlags = [];
+    let remCount = 0, addCount = 0;
+    parts.forEach(part => {
+      if(!part.added && !part.removed){
+        part.value.forEach(() => { leftFlags.push(false); rightFlags.push(false); });
+      } else if(part.removed){
+        part.value.forEach(() => { leftFlags.push(true); remCount++; });
+      } else if(part.added){
+        part.value.forEach(() => { rightFlags.push(true); addCount++; });
+      }
+    });
+    return {leftFlags, rightFlags, remCount, addCount};
+  }
+
+  // Extracts, for one PDF page, the rendered page image plus every word's
+  // pixel bounding box (approximated proportionally within each text run —
+  // pdf.js gives runs, not individual glyph positions, so word boxes are
+  // distributed by character-count share of the run's measured width).
+  // Applies a PDF viewport's transform matrix [a,b,c,d,e,f] to a point,
+  // done manually rather than via pdf.js internals (whose Util.applyTransform
+  // mutates its argument in place across versions instead of returning a value).
+  function applyViewportTransform(x, y, m){
+    return [x*m[0] + y*m[2] + m[4], x*m[1] + y*m[3] + m[5]];
+  }
+
+  async function renderPdfPageWithWords(page, scale){
+    const viewport = page.getViewport({scale});
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    await page.render({canvasContext: ctx, viewport}).promise;
+    const img = canvas.toDataURL('image/png');
+
+    const content = await page.getTextContent();
+    const words = [];
+    content.items.forEach(item => {
+      const str = item.str;
+      if(!str || !str.trim()) return;
+      const fontHeight = Math.hypot(item.transform[2], item.transform[3]) || Math.abs(item.transform[3]) || 10;
+      const x0 = item.transform[4], y0 = item.transform[5];
+      const width = item.width || (str.length * fontHeight * 0.5);
+      const p1 = applyViewportTransform(x0, y0, viewport.transform);
+      const p2 = applyViewportTransform(x0 + width, y0 + fontHeight, viewport.transform);
+      const boxLeft = Math.min(p1[0], p2[0]), boxRight = Math.max(p1[0], p2[0]);
+      const boxTop = Math.min(p1[1], p2[1]), boxBottom = Math.max(p1[1], p2[1]);
+      const boxWidth = boxRight - boxLeft, boxHeight = boxBottom - boxTop;
+
+      const total = str.length;
+      const re = /\S+/g;
+      let m;
+      while((m = re.exec(str))){
+        const startFrac = m.index / total;
+        const endFrac = (m.index + m[0].length) / total;
+        words.push({
+          text: m[0],
+          left: boxLeft + startFrac * boxWidth,
+          top: boxTop,
+          width: (endFrac - startFrac) * boxWidth,
+          height: boxHeight
+        });
+      }
+    });
+    return {img, width: viewport.width, height: viewport.height, words};
+  }
+
+  async function renderPdfPagesWithWords(buf, scale){
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+    const pages = [];
+    for(let i=1;i<=pdf.numPages;i++){
+      const page = await pdf.getPage(i);
+      pages.push(await renderPdfPageWithWords(page, scale));
+    }
+    return pages;
+  }
+
+  function diffSheets(sl, sr){
+    const rangeL = sl && sl['!ref'] ? XLSX.utils.decode_range(sl['!ref']) : {s:{r:0,c:0}, e:{r:0,c:0}};
+    const rangeR = sr && sr['!ref'] ? XLSX.utils.decode_range(sr['!ref']) : {s:{r:0,c:0}, e:{r:0,c:0}};
+    const maxRow = Math.max(rangeL.e.r, rangeR.e.r);
+    const maxCol = Math.max(rangeL.e.c, rangeR.e.c);
+    let rem = 0, add = 0;
+    let html = '<table class="diff-table"><tbody>';
+    for(let r=0; r<=maxRow; r++){
+      html += '<tr>';
+      for(let c=0; c<=maxCol; c++){
+        const addr = XLSX.utils.encode_cell({r, c});
+        const lCell = sl ? sl[addr] : undefined;
+        const rCell = sr ? sr[addr] : undefined;
+        const lVal = lCell !== undefined ? String(lCell.v) : '';
+        const rVal = rCell !== undefined ? String(rCell.v) : '';
+        let cls = '';
+        if(lVal !== rVal){
+          if(lVal && rVal){ cls = 'cell-mod'; rem++; add++; }
+          else if(lVal){ cls = 'cell-rem'; rem++; }
+          else if(rVal){ cls = 'cell-add'; add++; }
+        }
+        const display = rVal !== '' ? rVal : lVal;
+        const title = cls === 'cell-mod' ? ' title="Was: '+escapeHtml(lVal)+'"' : '';
+        html += '<td class="'+cls+'"'+title+'>'+escapeHtml(display)+'</td>';
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    return {tableHtml: html, rem, add};
+  }
+
+  // ---------- Rich-result UI plumbing ----------
+  function showRichResult(html){
+    introScreen.classList.add('hidden');
+    resultScreen.classList.add('active');
+    el('newCompareBtn').style.display = '';
+    el('swapBtn').style.display = '';
+    el('downloadBtn').style.display = '';
+    document.querySelector('.toolstrip').style.display = 'none';
+    el('panesWrap').style.display = 'none';
+    el('singlePane').style.display = 'none';
+    el('richResult').style.display = 'flex';
+    el('richBody').innerHTML = html;
+  }
+
+  function showTextResultUI(){
+    el('richResult').style.display = 'none';
+    document.querySelector('.toolstrip').style.display = 'flex';
+    if(currentView === 'single'){
+      el('panesWrap').style.display = 'none';
+      el('singlePane').style.display = 'flex';
+    } else {
+      el('panesWrap').style.display = 'flex';
+      el('singlePane').style.display = 'none';
+    }
+  }
+
+  // ---------- DOCX: formatted, paragraph-highlighted comparison ----------
+  async function renderDocxCompare(){
+    showLoading('Rendering documents…');
+    try{
+      const [leftRes, rightRes] = await Promise.all([
+        mammoth.convertToHtml({arrayBuffer: docMeta.left.buf.slice(0)}, mammothImgOpts()),
+        mammoth.convertToHtml({arrayBuffer: docMeta.right.buf.slice(0)}, mammothImgOpts())
+      ]);
+      const leftContainer = document.createElement('div'); leftContainer.innerHTML = leftRes.value;
+      const rightContainer = document.createElement('div'); rightContainer.innerHTML = rightRes.value;
+      const leftBlocks = Array.from(leftContainer.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6'));
+      const rightBlocks = Array.from(rightContainer.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6'));
+      const leftTexts = leftBlocks.map(b => b.textContent.trim());
+      const rightTexts = rightBlocks.map(b => b.textContent.trim());
+      const {leftFlags, rightFlags, remCount, addCount} = computeParaDiff(leftTexts, rightTexts);
+      leftBlocks.forEach((b,i) => { if(leftFlags[i] && b.textContent.trim() !== '') b.classList.add('removed-para'); });
+      rightBlocks.forEach((b,i) => { if(rightFlags[i] && b.textContent.trim() !== '') b.classList.add('added-para'); });
+
+      const html = `
+        <div class="docx-toolbar">
+          <span class="rich-label">Formatted document — changed paragraphs highlighted</span>
+          <span class="stat-pill rem">${remCount} changed / removed</span>
+          <span class="stat-pill add">${addCount} changed / added</span>
+          <button class="btn-small" id="toggleDocxText">View exact word differences</button>
+        </div>
+        <div class="docx-panes">
+          <div class="docx-pane"><div class="docx-pane-head">${escapeHtml(fileNameL)}</div><div class="docx-pane-body">${leftContainer.innerHTML}</div></div>
+          <div class="docx-pane"><div class="docx-pane-head">${escapeHtml(fileNameR)}</div><div class="docx-pane-body">${rightContainer.innerHTML}</div></div>
+        </div>`;
+      showRichResult(html);
+      el('toggleDocxText').addEventListener('click', () => {
+        currentMode = 'text';
+        runTextCompare(el('textLeft').value, el('textRight').value);
+      });
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // ---------- PPTX: slide-by-slide content + notes comparison ----------
+  // Aligns slides between the two decks by content, not by raw position —
+  // so if a slide is inserted/deleted/reordered in the middle, everything
+  // after it doesn't get silently compared against the wrong slide.
+  function alignSlides(leftSlides, rightSlides){
+    const sigLeft = leftSlides.map(s => s.blocks.join('\n') + '\u0000' + s.notes.join('\n'));
+    const sigRight = rightSlides.map(s => s.blocks.join('\n') + '\u0000' + s.notes.join('\n'));
+    const leftIdx = leftSlides.map((_, i) => i);
+    const rightIdx = rightSlides.map((_, i) => i);
+    const parts = Diff.diffArrays(leftIdx, rightIdx, { comparator: (a, b) => sigLeft[a] === sigRight[b] });
+
+    const pairs = [];
+    let li = 0, ri = 0, i = 0;
+    while(i < parts.length){
+      const part = parts[i];
+      if(!part.added && !part.removed){
+        part.value.forEach(() => { pairs.push({left: leftSlides[li], right: rightSlides[ri]}); li++; ri++; });
+        i++;
+      } else if(part.removed && parts[i+1] && parts[i+1].added){
+        const remCount = part.value.length, addCount = parts[i+1].value.length;
+        const maxCount = Math.max(remCount, addCount);
+        for(let k=0; k<maxCount; k++){
+          pairs.push({
+            left: k < remCount ? leftSlides[li+k] : null,
+            right: k < addCount ? rightSlides[ri+k] : null
+          });
+        }
+        li += remCount; ri += addCount;
+        i += 2;
+      } else if(part.removed){
+        part.value.forEach(() => { pairs.push({left: leftSlides[li], right: null}); li++; });
+        i++;
+      } else if(part.added){
+        part.value.forEach(() => { pairs.push({left: null, right: rightSlides[ri]}); ri++; });
+        i++;
+      }
+    }
+    return pairs;
+  }
+
+  async function renderPptxCompare(){
+    showLoading('Reading slides…');
+    try{
+      const [leftSlides, rightSlides] = await Promise.all([
+        parsePptxSlides(docMeta.left.buf.slice(0)),
+        parsePptxSlides(docMeta.right.buf.slice(0))
+      ]);
+      const pairs = alignSlides(leftSlides, rightSlides);
+      let totalRem = 0, totalAdd = 0;
+      let html = `<div class="docx-toolbar"><span class="rich-label">Slide-by-slide comparison — content and speaker notes</span><span id="pptxStats"></span></div><div class="pptx-list">`;
+
+      pairs.forEach((pair, i) => {
+        const ls = pair.left, rs = pair.right;
+        const leftText = ls ? ls.blocks.join('\n') : '';
+        const rightText = rs ? rs.blocks.join('\n') : '';
+        const leftNotes = ls ? ls.notes.join('\n') : '';
+        const rightNotes = rs ? rs.notes.join('\n') : '';
+        const contentDiff = computeLineWordDiff(leftText, rightText, 'both');
+        const notesDiff = computeLineWordDiff(leftNotes, rightNotes, 'both');
+        const cStats = statsFromLines(contentDiff.leftLines, contentDiff.rightLines);
+        const nStats = statsFromLines(notesDiff.leftLines, notesDiff.rightLines);
+        totalRem += cStats.rem + nStats.rem;
+        totalAdd += cStats.add + nStats.add;
+        const slideChanged = (cStats.rem + cStats.add + nStats.rem + nStats.add) > 0;
+        const leftImages = ls ? ls.images : [];
+        const rightImages = rs ? rs.images : [];
+        let imagesHtml = '';
+        if(leftImages.length || rightImages.length){
+          const imgCell = imgs => imgs.length
+            ? imgs.map(src => `<img src="${src}" class="slide-thumb">`).join('')
+            : '<span class="diffline-empty">No images</span>';
+          imagesHtml = `<div class="slide-section">
+            <div class="slide-col-label">Images — original (${leftImages.length}) / revised (${rightImages.length})</div>
+            <div class="slide-thumbs-row">
+              <div class="slide-thumbs">${imgCell(leftImages)}</div>
+              <div class="slide-thumbs">${imgCell(rightImages)}</div>
+            </div>
+          </div>`;
+        }
+        html += `<div class="slide-card ${slideChanged ? 'slide-changed' : ''}">
+          <div class="slide-card-head">Slide ${i+1}${!ls ? '<span class="tag-missing">not in original</span>' : ''}${!rs ? '<span class="tag-missing">removed in revised</span>' : ''}</div>
+          <div class="slide-section">
+            <div class="slide-col-label">Content</div>
+            ${unifiedHtmlFromLines(contentDiff.leftLines, contentDiff.rightLines)}
+          </div>
+          <div class="slide-section slide-notes-section">
+            <div class="slide-col-label">Speaker notes</div>
+            ${unifiedHtmlFromLines(notesDiff.leftLines, notesDiff.rightLines)}
+          </div>
+          ${imagesHtml}
+        </div>`;
+      });
+      html += `</div>`;
+      showRichResult(html);
+      el('pptxStats').innerHTML = `<span class="stat-pill rem">${totalRem} removed</span> <span class="stat-pill add">${totalAdd} added</span>`;
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // ---------- XLSX: cell-level grid comparison ----------
+  async function renderXlsxCompare(){
+    showLoading('Reading spreadsheets…');
+    try{
+      const wbLeft = XLSX.read(docMeta.left.buf.slice(0), {type:'array'});
+      const wbRight = XLSX.read(docMeta.right.buf.slice(0), {type:'array'});
+      const sheetNames = Array.from(new Set([...wbLeft.SheetNames, ...wbRight.SheetNames]));
+      let totalRem = 0, totalAdd = 0;
+      let tabsHtml = '', panelsHtml = '';
+      sheetNames.forEach((name, idx) => {
+        const sl = wbLeft.Sheets[name]; const sr = wbRight.Sheets[name];
+        const {tableHtml, rem, add} = diffSheets(sl, sr);
+        totalRem += rem; totalAdd += add;
+        tabsHtml += `<button class="sheet-tab ${idx===0 ? 'active' : ''}" data-sheet="${idx}">${escapeHtml(name)}</button>`;
+        panelsHtml += `<div class="sheet-panel" data-sheet="${idx}" style="${idx===0 ? '' : 'display:none;'}">${tableHtml}</div>`;
+      });
+      const html = `
+        <div class="docx-toolbar">
+          <span class="rich-label">Spreadsheet comparison — changed cells highlighted</span>
+          <span class="stat-pill rem">${totalRem} removed</span>
+          <span class="stat-pill add">${totalAdd} added</span>
+        </div>
+        <div class="sheet-tabs">${tabsHtml}</div>
+        <div class="sheet-panels">${panelsHtml}</div>`;
+      showRichResult(html);
+      document.querySelectorAll('.sheet-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.sheet-tab').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          const idx = btn.dataset.sheet;
+          document.querySelectorAll('.sheet-panel').forEach(p => { p.style.display = p.dataset.sheet === idx ? '' : 'none'; });
+        });
+      });
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // ---------- PDF: rendered page previews + text-diff toggle ----------
+  async function renderPdfCompare(){
+    await renderPdfCompareFromBuffers(docMeta.left.buf.slice(0), docMeta.right.buf.slice(0));
+  }
+
+  async function renderPdfCompareFromBuffers(leftBuf, rightBuf, labelOverride){
+    showLoading('Rendering pages…');
+    try{
+      const scale = 1.5;
+      const [leftPages, rightPages] = await Promise.all([
+        renderPdfPagesWithWords(leftBuf, scale),
+        renderPdfPagesWithWords(rightBuf, scale)
+      ]);
+      const maxPages = Math.max(leftPages.length, rightPages.length);
+      let totalRem = 0, totalAdd = 0;
+      let html = `<div class="docx-toolbar">
+        <span class="rich-label">${labelOverride || 'Original pages, differences highlighted in place'}</span>
+        <span class="stat-pill rem" id="pdfRemStat">0 removed</span>
+        <span class="stat-pill add" id="pdfAddStat">0 added</span>
+      </div><div class="pdf-pages">`;
+
+      for(let i=0; i<maxPages; i++){
+        const lp = leftPages[i], rp = rightPages[i];
+        let leftHighlights = '', rightHighlights = '';
+
+        if(lp && rp){
+          const leftWords = lp.words.map(w => w.text);
+          const rightWords = rp.words.map(w => w.text);
+          const parts = Diff.diffArrays(leftWords, rightWords);
+          let li = 0, ri = 0;
+          parts.forEach(part => {
+            if(!part.added && !part.removed){
+              li += part.value.length; ri += part.value.length;
+            } else if(part.removed){
+              part.value.forEach(() => {
+                const w = lp.words[li]; li++;
+                if(w){ leftHighlights += boxHtml(w, 'pdf-hl-rem', lp.width, lp.height); totalRem++; }
+              });
+            } else if(part.added){
+              part.value.forEach(() => {
+                const w = rp.words[ri]; ri++;
+                if(w){ rightHighlights += boxHtml(w, 'pdf-hl-add', rp.width, rp.height); totalAdd++; }
+              });
+            }
+          });
+        } else if(lp && !rp){
+          lp.words.forEach(w => { leftHighlights += boxHtml(w, 'pdf-hl-rem', lp.width, lp.height); totalRem++; });
+        } else if(rp && !lp){
+          rp.words.forEach(w => { rightHighlights += boxHtml(w, 'pdf-hl-add', rp.width, rp.height); totalAdd++; });
+        }
+
+        html += `<div class="pdf-page-row">
+          <div class="pdf-page-col">
+            <div class="pdf-page-label">Page ${i+1} — ${escapeHtml(fileNameL)}</div>
+            ${lp ? `<div class="pdf-page-frame" style="aspect-ratio:${lp.width}/${lp.height};"><img src="${lp.img}">${leftHighlights}</div>` : '<div class="pdf-missing">No page</div>'}
+          </div>
+          <div class="pdf-page-col">
+            <div class="pdf-page-label">Page ${i+1} — ${escapeHtml(fileNameR)}</div>
+            ${rp ? `<div class="pdf-page-frame" style="aspect-ratio:${rp.width}/${rp.height};"><img src="${rp.img}">${rightHighlights}</div>` : '<div class="pdf-missing">No page</div>'}
+          </div>
+        </div>`;
+      }
+      html += `</div>`;
+      showRichResult(html);
+      el('pdfRemStat').textContent = totalRem + ' removed';
+      el('pdfAddStat').textContent = totalAdd + ' added';
+    } finally {
+      hideLoading();
+    }
+  }
+
+  function boxHtml(w, cls, pageWidth, pageHeight){
+    const leftPct = (w.left / pageWidth) * 100;
+    const topPct = (w.top / pageHeight) * 100;
+    const widthPct = (w.width / pageWidth) * 100;
+    const heightPct = (w.height / pageHeight) * 100;
+    return `<div class="pdf-hl ${cls}" style="left:${leftPct}%;top:${topPct}%;width:${widthPct}%;height:${heightPct}%;" title="${escapeHtml(w.text)}"></div>`;
+  }
+
+  // ---------- Mixed formats: show each file in its own native format,
+  // side by side, with no fabricated highlighting between them (there is
+  // no shared visual space across different formats to draw a diff on) ----------
+  async function renderSingleSide(type, buf){
+    if(type === 'docx'){
+      const res = await mammoth.convertToHtml({arrayBuffer: buf}, mammothImgOpts());
+      return res.value;
+    }
+    if(type === 'pptx'){
+      const slides = await parsePptxSlides(buf);
+      return slides.map((s, i) => {
+        const imgs = s.images.map(src => `<img src="${src}" class="slide-thumb">`).join('');
+        const contentHtml = s.blocks.length
+          ? s.blocks.map(b => `<div>${escapeHtml(b)}</div>`).join('')
+          : '<span class="diffline-empty">No content</span>';
+        return `<div class="slide-card">
+          <div class="slide-card-head">Slide ${i+1}</div>
+          <div class="slide-section"><div class="slide-col-label">Content</div>${contentHtml}</div>
+          ${s.notes.length ? `<div class="slide-section slide-notes-section"><div class="slide-col-label">Speaker notes</div>${s.notes.map(n=>`<div>${escapeHtml(n)}</div>`).join('')}</div>` : ''}
+          ${imgs ? `<div class="slide-section"><div class="slide-col-label">Images</div><div class="slide-thumbs">${imgs}</div></div>` : ''}
+        </div>`;
+      }).join('');
+    }
+    if(type === 'pdf'){
+      const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+      let html = '';
+      for(let i=1; i<=pdf.numPages; i++){
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({scale: 1.3});
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+        html += `<div class="pdf-page-row" style="justify-content:center;">
+          <div class="pdf-page-col" style="flex:none; width:100%; max-width:640px;">
+            <div class="pdf-page-label">Page ${i}</div>
+            <div class="pdf-page-frame" style="aspect-ratio:${viewport.width}/${viewport.height};"><img src="${canvas.toDataURL('image/png')}"></div>
+          </div>
+        </div>`;
+      }
+      return `<div class="pdf-pages">${html}</div>`;
+    }
+    if(type === 'xlsx'){
+      const wb = XLSX.read(buf, {type:'array'});
+      return wb.SheetNames.map(name => {
+        const tableHtml = XLSX.utils.sheet_to_html(wb.Sheets[name], {editable:false});
+        return `<div class="slide-col-label" style="margin:14px 0 6px;">${escapeHtml(name)}</div>${tableHtml}`;
+      }).join('');
+    }
+    return '<p>Preview not available for this format.</p>';
+  }
+
+  async function renderMixedCompare(){
+    showLoading('Rendering files…');
+    try{
+      const [leftHtml, rightHtml] = await Promise.all([
+        renderSingleSide(docMeta.left.type, docMeta.left.buf.slice(0)),
+        renderSingleSide(docMeta.right.type, docMeta.right.buf.slice(0))
+      ]);
+      const html = `
+        <div class="docx-toolbar">
+          <span class="rich-label">${docMeta.left.type.toUpperCase()} vs ${docMeta.right.type.toUpperCase()} — each shown in its own original format. Different formats have no shared layout to draw a diff on, so nothing here is marked as changed.</span>
+          <button class="btn-small" id="toggleMixedText">Compare as text instead</button>
+        </div>
+        <div class="docx-panes">
+          <div class="docx-pane"><div class="docx-pane-head">${escapeHtml(fileNameL)}</div><div class="docx-pane-body">${leftHtml}</div></div>
+          <div class="docx-pane"><div class="docx-pane-head">${escapeHtml(fileNameR)}</div><div class="docx-pane-body">${rightHtml}</div></div>
+        </div>`;
+      showRichResult(html);
+      el('toggleMixedText').addEventListener('click', () => {
+        currentMode = 'text';
+        runTextCompare(el('textLeft').value, el('textRight').value);
+      });
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // ---------- Dispatcher ----------
+  // ---------- Optional conversion server (for true cross-format highlighting) ----------
+  const SERVER_URL_KEY = 'diffchecker_server_url';
+  function getServerUrl(){
+    try{ return (localStorage.getItem(SERVER_URL_KEY) || '').trim(); } catch(e){ return ''; }
+  }
+  function setServerUrl(url){
+    try{ localStorage.setItem(SERVER_URL_KEY, url.trim()); } catch(e){ /* ignore */ }
+  }
+
+  async function convertToPdfViaServer(buf, filename, serverUrl){
+    const form = new FormData();
+    form.append('file', new Blob([buf]), filename);
+    const resp = await fetch(serverUrl.replace(/\/$/, '') + '/convert', { method: 'POST', body: form });
+    if(!resp.ok){
+      let msg = 'HTTP ' + resp.status;
+      try{ const j = await resp.json(); if(j.error) msg = j.error; } catch(e){ /* ignore */ }
+      throw new Error(msg);
+    }
+    return await resp.arrayBuffer();
+  }
+
+  async function renderServerCompare(serverUrl){
+    const leftIsFile = docMeta.left && el('textLeft').value === fileTextLeft;
+    const rightIsFile = docMeta.right && el('textRight').value === fileTextRight;
+    if(!leftIsFile || !rightIsFile){
+      throw new Error('Both sides need an uploaded file to use server-based comparison.');
+    }
+    showLoading('Converting files on server…');
+    try{
+      const leftType = docMeta.left.type, rightType = docMeta.right.type;
+      const [leftPdfBuf, rightPdfBuf] = await Promise.all([
+        leftType === 'pdf' ? docMeta.left.buf.slice(0) : convertToPdfViaServer(docMeta.left.buf.slice(0), 'left.' + leftType, serverUrl),
+        rightType === 'pdf' ? docMeta.right.buf.slice(0) : convertToPdfViaServer(docMeta.right.buf.slice(0), 'right.' + rightType, serverUrl)
+      ]);
+      currentMode = 'pdf';
+      const label = (leftType === rightType)
+        ? 'Original pages, differences highlighted in place'
+        : `${leftType.toUpperCase()} vs ${rightType.toUpperCase()} — both converted to PDF on the server, differences highlighted in place`;
+      await renderPdfCompareFromBuffers(leftPdfBuf, rightPdfBuf, label);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function handleCompare(){
+    const rawLeft = el('textLeft').value;
+    const rawRight = el('textRight').value;
+    if(!rawLeft.trim() && !rawRight.trim()){
+      showErr('Add text or a file on both sides before comparing.');
+      return;
+    }
+    showErr('');
+
+    const serverUrl = getServerUrl();
+    if(serverUrl){
+      try{
+        await renderServerCompare(serverUrl);
+        return;
+      } catch(err){
+        console.error('Server compare failed, falling back:', err);
+        showErr('Server comparison failed (' + err.message + ') — using the built-in comparison instead.');
+      }
+    }
+
+    const mode = detectMode();
+    currentMode = mode;
+    try{
+      if(mode === 'docx') await renderDocxCompare();
+      else if(mode === 'pptx') await renderPptxCompare();
+      else if(mode === 'xlsx') await renderXlsxCompare();
+      else if(mode === 'pdf') await renderPdfCompare();
+      else if(mode === 'mixed') await renderMixedCompare();
+      else runTextCompare(rawLeft, rawRight);
+    } catch(err){
+      console.error(err);
+      hideLoading();
+      showErr('Something went wrong rendering that format. Try again, or paste the text directly.');
+    }
+  }
+
+  // ---------- Render (plain text mode) ----------
+  function escapeHtml(s){
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function renderWordDiff(wordDiff, keepAdded){
+    // keepAdded=true -> render right side (show only additions); false -> render left side (show only removals)
+    let html = '';
+    wordDiff.forEach(p => {
+      const text = escapeHtml(p.value);
+      if(p.added){
+        if(keepAdded) html += '<mark class="diff-add">'+text+'</mark>';
+      } else if(p.removed){
+        if(!keepAdded) html += '<mark class="diff-del">'+text+'</mark>';
+      } else {
+        html += text;
+      }
+    });
+    return html;
+  }
+
+  function renderWordDiffUnified(wordDiff){
+    // shows both removals (struck) and additions (highlighted) in one line, for single view
+    let html = '';
+    wordDiff.forEach(p => {
+      const text = escapeHtml(p.value);
+      if(p.added){
+        html += '<mark class="diff-add">'+text+'</mark>';
+      } else if(p.removed){
+        html += '<mark class="diff-del">'+text+'</mark>';
+      } else {
+        html += text;
+      }
+    });
+    return html;
+  }
+
+  function buildLineHtml(lineObj, side){
+    if(lineObj.type === 'same'){
+      return escapeHtml(lineObj.text) || '&nbsp;';
+    }
+    if(lineObj.type === 'removed'){
+      return '<mark class="diff-del">'+ (escapeHtml(lineObj.text)||' ') +'</mark>';
+    }
+    if(lineObj.type === 'added'){
+      return '<mark class="diff-add">'+ (escapeHtml(lineObj.text)||' ') +'</mark>';
+    }
+    if(lineObj.type === 'changed'){
+      return renderWordDiff(lineObj.wordDiff, side === 'right') || '&nbsp;';
+    }
+    return '&nbsp;';
+  }
+
+  function renderResult(){
+    introScreen.classList.add('hidden');
+    resultScreen.classList.add('active');
+    el('newCompareBtn').style.display = '';
+    el('swapBtn').style.display = '';
+    el('downloadBtn').style.display = '';
+    showTextResultUI();
+
+    el('headLeft').textContent = fileNameL || 'Original';
+    el('headRight').textContent = fileNameR || 'Revised';
+
+    const {leftLines, rightLines} = lastDiffData;
+    const maxLen = Math.max(leftLines.length, rightLines.length);
+
+    let remCount = 0, addCount = 0;
+    changeList = [];
+
+    let leftHtml = '', rightHtml = '', singleHtml = '';
+    for(let idx=0; idx<maxLen; idx++){
+      const l = leftLines[idx];
+      const r = rightLines[idx];
+      const lChanged = l && l.type !== 'same';
+      const rChanged = r && r.type !== 'same';
+
+      // word-accurate counts
+      if(l && l.type === 'removed') remCount += countWords(l.text);
+      if(r && r.type === 'added') addCount += countWords(r.text);
+      if(l && l.type === 'changed' && l.wordDiff){
+        l.wordDiff.forEach(p => {
+          if(p.removed) remCount += countWords(p.value);
+          if(p.added) addCount += countWords(p.value);
+        });
+      }
+
+      if(lChanged || rChanged){
+        changeList.push(idx);
+      }
+      const lCls = 'doc-line' + (lChanged ? ' changed-line' : '') + (lChanged ? ' chg-'+idx : '');
+      const rCls = 'doc-line' + (rChanged ? ' changed-line' : '') + (rChanged ? ' chg-'+idx : '');
+      leftHtml += '<div class="'+lCls+'" data-idx="'+idx+'"><span class="ln">'+(l?idx+1:'')+'</span><span class="content">'+ (l ? buildLineHtml(l,'left') : '&nbsp;') +'</span></div>';
+      rightHtml += '<div class="'+rCls+'" data-idx="'+idx+'"><span class="ln">'+(r?idx+1:'')+'</span><span class="content">'+ (r ? buildLineHtml(r,'right') : '&nbsp;') +'</span></div>';
+
+      // unified single-view: show removed line, then added line, or the merged word diff for changed pairs
+      const sCls = 'doc-line' + ((lChanged || rChanged) ? ' changed-line' : '');
+      if(l && l.type === 'changed'){
+        singleHtml += '<div class="'+sCls+'" data-idx="'+idx+'"><span class="ln">'+(idx+1)+'</span><span class="content">'+ renderWordDiffUnified(l.wordDiff) +'</span></div>';
+      } else {
+        if(l && l.type === 'removed'){
+          singleHtml += '<div class="'+sCls+'" data-idx="'+idx+'"><span class="ln">'+(idx+1)+'</span><span class="content"><mark class="diff-del">'+(escapeHtml(l.text)||' ')+'</mark></span></div>';
+        }
+        if(r && r.type === 'added'){
+          singleHtml += '<div class="'+sCls+'" data-idx="'+idx+'"><span class="ln">'+(idx+1)+'</span><span class="content"><mark class="diff-add">'+(escapeHtml(r.text)||' ')+'</mark></span></div>';
+        }
+        if(l && l.type === 'same'){
+          singleHtml += '<div class="'+sCls+'" data-idx="'+idx+'"><span class="ln">'+(idx+1)+'</span><span class="content">'+(escapeHtml(l.text)||'&nbsp;')+'</span></div>';
+        }
+      }
+    }
+
+    el('docLeft').innerHTML = leftHtml;
+    el('docRight').innerHTML = rightHtml;
+    el('docSingle').innerHTML = singleHtml;
+    el('remStat').textContent = remCount + ' removed';
+    el('addStat').textContent = addCount + ' added';
+    el('totalChanges').textContent = changeList.length;
+    currentChangeIdx = changeList.length ? 0 : -1;
+    updateChangeCounter();
+    buildGutter(maxLen);
+    syncScroll();
+  }
+
+  function updateChangeCounter(){
+    el('curChange').textContent = changeList.length ? (currentChangeIdx+1) : 0;
+    el('prevChange').disabled = changeList.length === 0;
+    el('nextChange').disabled = changeList.length === 0;
+  }
+
+  function jumpToChange(i){
+    if(i < 0 || i >= changeList.length) return;
+    currentChangeIdx = i;
+    updateChangeCounter();
+    const idx = changeList[i];
+    document.querySelectorAll('.jump-target').forEach(n => n.classList.remove('jump-target'));
+
+    if(currentView === 'single'){
+      const targetS = document.querySelector('#docSingle [data-idx="'+idx+'"]');
+      if(targetS){
+        targetS.classList.add('jump-target');
+        const container = el('scrollSingle');
+        container.scrollTop = targetS.offsetTop - container.clientHeight/2;
+      }
+      return;
+    }
+
+    const targetL = document.querySelector('#docLeft [data-idx="'+idx+'"]');
+    const targetR = document.querySelector('#docRight [data-idx="'+idx+'"]');
+    if(targetL) targetL.classList.add('jump-target');
+    if(targetR) targetR.classList.add('jump-target');
+    const target = targetL || targetR;
+    if(target){
+      const container = target.closest('.pane-scroll');
+      const offset = target.offsetTop - container.clientHeight/2;
+      container.scrollTop = offset;
+      const otherScroll = container.id === 'scrollLeft' ? el('scrollRight') : el('scrollLeft');
+      otherScroll.scrollTop = offset;
+    }
+  }
+
+  el('prevChange').addEventListener('click', () => jumpToChange(currentChangeIdx - 1 < 0 ? changeList.length-1 : currentChangeIdx -1));
+  el('nextChange').addEventListener('click', () => jumpToChange((currentChangeIdx + 1) % changeList.length));
+
+  function buildGutter(maxLen){
+    const gutterMarks = el('gutterMarks');
+    gutterMarks.innerHTML = '';
+    if(maxLen === 0) return;
+    const totalHeight = el('docLeft').scrollHeight || (maxLen * 25);
+    const lineHeight = totalHeight / maxLen;
+    changeList.forEach(idx => {
+      const l = lastDiffData.leftLines[idx];
+      const r = lastDiffData.rightLines[idx];
+      let cls = 'mod';
+      if(l && l.type === 'removed' && !r) cls = 'rem';
+      else if(r && r.type === 'added' && !l) cls = 'add';
+      const mark = document.createElement('div');
+      mark.className = 'gutter-mark ' + cls;
+      mark.style.top = (idx * lineHeight) + 'px';
+      mark.style.height = Math.max(lineHeight, 3) + 'px';
+      mark.title = 'Jump to change';
+      mark.addEventListener('click', () => {
+        const ci = changeList.indexOf(idx);
+        if(ci >= 0) jumpToChange(ci);
+      });
+      gutterMarks.appendChild(mark);
+    });
+  }
+
+  let syncingScroll = false;
+  function syncScroll(){
+    const sl = el('scrollLeft'), sr = el('scrollRight');
+    sl.onscroll = () => {
+      if(syncingScroll || currentView !== 'side') return;
+      syncingScroll = true;
+      sr.scrollTop = sl.scrollTop;
+      syncingScroll = false;
+    };
+    sr.onscroll = () => {
+      if(syncingScroll || currentView !== 'side') return;
+      syncingScroll = true;
+      sl.scrollTop = sr.scrollTop;
+      syncingScroll = false;
+    };
+  }
+
+  // ---------- View toggle ----------
+  el('viewSide').addEventListener('click', () => {
+    currentView = 'side';
+    el('viewSide').classList.add('active');
+    el('viewSingle').classList.remove('active');
+    el('panesWrap').style.display = 'flex';
+    el('singlePane').style.display = 'none';
+    document.querySelector('.pane.left').style.display = 'flex';
+    document.querySelector('.pane.right').style.display = 'flex';
+    el('gutter').style.display = '';
+    syncScroll();
+  });
+  el('viewSingle').addEventListener('click', () => {
+    currentView = 'single';
+    el('viewSingle').classList.add('active');
+    el('viewSide').classList.remove('active');
+    el('panesWrap').style.display = 'none';
+    el('singlePane').style.display = 'flex';
+  });
+
+  // ---------- Buttons ----------
+  el('compareBtn').addEventListener('click', handleCompare);
+
+  el('newCompareBtn').addEventListener('click', () => {
+    resultScreen.classList.remove('active');
+    introScreen.classList.remove('hidden');
+    el('newCompareBtn').style.display = 'none';
+    el('swapBtn').style.display = 'none';
+    el('downloadBtn').style.display = 'none';
+  });
+
+  el('swapBtn').addEventListener('click', () => {
+    const tl = el('textLeft').value, tr = el('textRight').value;
+    el('textLeft').value = tr; el('textRight').value = tl;
+    const fnl = fileNameL, fnr = fileNameR;
+    fileNameL = fnr; fileNameR = fnl;
+    el('fileNameLeft').textContent = fileNameL;
+    el('fileNameRight').textContent = fileNameR;
+    const ftl = fileTextLeft, ftr = fileTextRight;
+    fileTextLeft = ftr; fileTextRight = ftl;
+    const dl = docMeta.left, dr = docMeta.right;
+    docMeta.left = dr; docMeta.right = dl;
+    handleCompare();
+  });
+
+  el('downloadBtn').addEventListener('click', () => {
+    let bodyHtml;
+    if(currentMode === 'text'){
+      bodyHtml = `<div class="cols">
+        <div class="col"><h2>${escapeHtml(fileNameL||'Original')}</h2>${el('docLeft').innerHTML}</div>
+        <div class="col"><h2>${escapeHtml(fileNameR||'Revised')}</h2>${el('docRight').innerHTML}</div>
+      </div>`;
+    } else {
+      bodyHtml = el('richBody').innerHTML;
+    }
+    const report = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Comparison Report</title>
+    <style>
+      body{font-family:'IBM Plex Mono',monospace; margin:0; padding:24px; background:#f7f6f3; color:#1a2332;}
+      h1{font-family:sans-serif; font-size:18px;}
+      .cols{display:flex; gap:16px;}
+      .col{flex:1; background:#fff; border:1px solid #e2e0da; border-radius:6px; padding:16px; font-size:12.5px; line-height:1.8; white-space:pre-wrap; word-break:break-word;}
+      .col h2{font-family:sans-serif; font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#4a5568; margin-top:0;}
+      mark.diff-del{background:#fbe4e4; color:#8a2c2c; text-decoration:line-through;}
+      mark.diff-add{background:#e1ecf7; color:#1f4e79;}
+      .doc-line{display:flex;} .ln{width:36px;flex-shrink:0;color:#b8b5ac;text-align:right;padding-right:10px;font-size:11px;} .content{flex:1;}
+      .docx-panes,.pptx-list,.pdf-pages{display:flex; gap:16px;} .docx-pane,.pdf-page-col{flex:1; background:#fff; border:1px solid #e2e0da; border-radius:6px; padding:14px;}
+      .removed-para{background:#fbe4e4; border-left:3px solid #e8a5a5; padding-left:10px;}
+      .added-para{background:#e1ecf7; border-left:3px solid #a9c7e6; padding-left:10px;}
+      .diff-table{border-collapse:collapse; font-size:12px;} .diff-table td{border:1px solid #e2e0da; padding:4px 10px;}
+      .cell-mod{background:#fdf1de; color:#c17f2e; font-weight:600;} .cell-rem{background:#fbe4e4; color:#8a2c2c; text-decoration:line-through;} .cell-add{background:#e1ecf7; color:#1f4e79; font-weight:600;}
+      .slide-card{border:1px solid #e2e0da; border-radius:6px; margin-bottom:14px; padding:10px; background:#fff;}
+    </style></head><body>
+    <h1>Document Comparison Report — ${new Date().toLocaleString()}</h1>
+    <p style="font-family:sans-serif;font-size:12px;color:#4a5568;">${escapeHtml(fileNameL||'Original')} vs ${escapeHtml(fileNameR||'Revised')}</p>
+    ${bodyHtml}
+    </body></html>`;
+    const blob = new Blob([report], {type:'text/html'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'comparison-report.html';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  window.addEventListener('resize', () => {
+    if(lastDiffData) buildGutter(Math.max(lastDiffData.leftLines.length, lastDiffData.rightLines.length));
+  });
+
+})();
+</script>
+</body>
+</html>
