@@ -824,6 +824,25 @@
   const loadingText = el('loadingText');
 
   let fileTextLeft = null, fileTextRight = null;
+
+  // ---------- Optional conversion server (for true cross-format highlighting) ----------
+  // Baked-in default so the whole team gets cross-format comparison with zero
+  // setup. A per-browser override (via the settings panel) still takes priority.
+  // Declared early since the settings UI wiring below reads it immediately.
+  const DEFAULT_SERVER_URL = 'https://diffchecker-server-q57c.onrender.com';
+  const SERVER_URL_KEY = 'diffchecker_server_url';
+  const SERVER_OFF_SENTINEL = '__off__';
+  function getServerUrl(){
+    try{
+      const stored = (localStorage.getItem(SERVER_URL_KEY) || '').trim();
+      if(stored === SERVER_OFF_SENTINEL) return '';
+      return stored || DEFAULT_SERVER_URL;
+    } catch(e){ return DEFAULT_SERVER_URL; }
+  }
+  function setServerUrl(url){
+    const trimmed = url.trim();
+    try{ localStorage.setItem(SERVER_URL_KEY, trimmed === '' ? SERVER_OFF_SENTINEL : trimmed); } catch(e){ /* ignore */ }
+  }
   let fileNameL = '', fileNameR = '';
   let lastDiffData = null;
   let currentView = 'side';
@@ -920,7 +939,7 @@
       showErr('');
     } catch(err){
       console.error(err);
-      showErr('Could not read "' + file.name + '". Try pasting the text instead.');
+      showErr('Could not read "' + file.name + '" (' + err.message + '). Try pasting the text instead.');
     } finally {
       hideLoading();
     }
@@ -1124,22 +1143,26 @@
     // 1. Determine the TRUE display order of slides via presentation.xml + its rels
     //    (slide files are numbered by creation order, not display order — after
     //    reordering or deleting slides, e.g. slide23.xml, these no longer match).
-    const presDoc = await parseXml('ppt/presentation.xml');
-    const presRelsDoc = await parseXml('ppt/_rels/presentation.xml.rels');
-    const relIdToTarget = {};
-    if(presRelsDoc){
-      Array.from(presRelsDoc.getElementsByTagName('Relationship')).forEach(r => {
-        relIdToTarget[r.getAttribute('Id')] = r.getAttribute('Target');
-      });
-    }
     let slidePaths = [];
-    if(presDoc){
-      const sldIds = Array.from(presDoc.getElementsByTagName('p:sldId'));
-      slidePaths = sldIds.map(node => {
-        const rid = node.getAttribute('r:id');
-        const target = relIdToTarget[rid];
-        return target ? resolveZipPath('ppt/', target) : null;
-      }).filter(Boolean);
+    try{
+      const presDoc = await parseXml('ppt/presentation.xml');
+      const presRelsDoc = await parseXml('ppt/_rels/presentation.xml.rels');
+      const relIdToTarget = {};
+      if(presRelsDoc){
+        Array.from(presRelsDoc.getElementsByTagName('Relationship')).forEach(r => {
+          relIdToTarget[r.getAttribute('Id')] = r.getAttribute('Target');
+        });
+      }
+      if(presDoc){
+        const sldIds = Array.from(presDoc.getElementsByTagName('p:sldId'));
+        slidePaths = sldIds.map(node => {
+          const rid = node.getAttribute('r:id');
+          const target = relIdToTarget[rid];
+          return target ? resolveZipPath('ppt/', target) : null;
+        }).filter(Boolean);
+      }
+    } catch(e){
+      console.warn('Could not determine slide display order from presentation.xml, falling back to file order', e);
     }
     if(slidePaths.length === 0){
       // fallback: sort by internal file number if presentation.xml couldn't be parsed
@@ -1152,64 +1175,75 @@
     let displayIndex = 0;
     for(const path of slidePaths){
       displayIndex++;
-      const doc = await parseXml(path);
-      if(!doc){ slides.push({number: displayIndex, blocks: [], notes: [], images: []}); continue; }
+      try{
+        const doc = await parseXml(path);
+        if(!doc){ slides.push({number: displayIndex, blocks: [], notes: [], images: []}); continue; }
 
-      const paras = Array.from(doc.getElementsByTagName('a:p'));
-      const blocks = paras
-        .map(p => Array.from(p.getElementsByTagName('a:t')).map(t => t.textContent).join(''))
-        .filter(t => t.trim() !== '');
+        const paras = Array.from(doc.getElementsByTagName('a:p'));
+        const blocks = paras
+          .map(p => Array.from(p.getElementsByTagName('a:t')).map(t => t.textContent).join(''))
+          .filter(t => t.trim() !== '');
 
-      // resolve this slide's own relationships (notes + images) via its .rels file
-      const slideFileName = path.split('/').pop();
-      const relsPath = 'ppt/slides/_rels/' + slideFileName + '.rels';
-      const relsDoc = await parseXml(relsPath);
-      let notesPath = null;
-      const imagePaths = [];
-      if(relsDoc){
-        Array.from(relsDoc.getElementsByTagName('Relationship')).forEach(r => {
-          const type = r.getAttribute('Type') || '';
-          const target = r.getAttribute('Target') || '';
-          if(/\/notesSlide$/.test(type)){
-            notesPath = resolveZipPath('ppt/slides/', target);
-          } else if(/\/image$/.test(type)){
-            imagePaths.push(resolveZipPath('ppt/slides/', target));
-          }
-        });
-      }
-
-      // notes
-      let notes = [];
-      const ndoc = notesPath ? await parseXml(notesPath) : null;
-      if(ndoc){
-        const shapes = Array.from(ndoc.getElementsByTagName('p:sp'));
-        shapes.forEach(sp => {
-          const ph = sp.getElementsByTagName('p:ph')[0];
-          const phType = ph ? ph.getAttribute('type') : null;
-          if(phType === 'sldNum' || phType === 'ftr' || phType === 'dt') return;
-          const ps = Array.from(sp.getElementsByTagName('a:p'));
-          ps.forEach(p => {
-            const t = Array.from(p.getElementsByTagName('a:t')).map(x => x.textContent).join('');
-            if(t.trim() !== '') notes.push(t);
-          });
-        });
-      }
-
-      // images actually placed on this slide
-      const images = [];
-      for(const imgPath of imagePaths){
-        const file = zip.file(imgPath);
-        if(!file) continue;
-        const ext = imgPath.split('.').pop().toLowerCase();
-        const mime = IMAGE_EXT_MIME[ext];
-        if(!mime) continue; // skip unsupported formats (emf/wmf vector metafiles browsers can't render)
+        // resolve this slide's own relationships (notes + images) via its .rels file
+        let notesPath = null;
+        const imagePaths = [];
         try{
-          const base64 = await file.async('base64');
-          images.push('data:' + mime + ';base64,' + base64);
-        } catch(e) { /* skip unreadable image */ }
-      }
+          const slideFileName = path.split('/').pop();
+          const relsPath = 'ppt/slides/_rels/' + slideFileName + '.rels';
+          const relsDoc = await parseXml(relsPath);
+          if(relsDoc){
+            Array.from(relsDoc.getElementsByTagName('Relationship')).forEach(r => {
+              const type = r.getAttribute('Type') || '';
+              const target = r.getAttribute('Target') || '';
+              if(!target) return;
+              if(/\/notesSlide$/.test(type)){
+                notesPath = resolveZipPath('ppt/slides/', target);
+              } else if(/\/image$/.test(type)){
+                imagePaths.push(resolveZipPath('ppt/slides/', target));
+              }
+            });
+          }
+        } catch(e){ console.warn('Slide ' + displayIndex + ': could not resolve relationships', e); }
 
-      slides.push({number: displayIndex, blocks, notes, images});
+        // notes
+        let notes = [];
+        try{
+          const ndoc = notesPath ? await parseXml(notesPath) : null;
+          if(ndoc){
+            const shapes = Array.from(ndoc.getElementsByTagName('p:sp'));
+            shapes.forEach(sp => {
+              const ph = sp.getElementsByTagName('p:ph')[0];
+              const phType = ph ? ph.getAttribute('type') : null;
+              if(phType === 'sldNum' || phType === 'ftr' || phType === 'dt') return;
+              const ps = Array.from(sp.getElementsByTagName('a:p'));
+              ps.forEach(p => {
+                const t = Array.from(p.getElementsByTagName('a:t')).map(x => x.textContent).join('');
+                if(t.trim() !== '') notes.push(t);
+              });
+            });
+          }
+        } catch(e){ console.warn('Slide ' + displayIndex + ': could not read notes', e); }
+
+        // images actually placed on this slide
+        const images = [];
+        for(const imgPath of imagePaths){
+          try{
+            const file = zip.file(imgPath);
+            if(!file) continue;
+            const ext = imgPath.split('.').pop().toLowerCase();
+            const mime = IMAGE_EXT_MIME[ext];
+            if(!mime) continue; // skip unsupported formats (emf/wmf vector metafiles browsers can't render)
+            const base64 = await file.async('base64');
+            images.push('data:' + mime + ';base64,' + base64);
+          } catch(e) { console.warn('Slide ' + displayIndex + ': could not read an image', e); }
+        }
+
+        slides.push({number: displayIndex, blocks, notes, images});
+      } catch(e){
+        // one malformed slide shouldn't take down the whole file
+        console.warn('Slide ' + displayIndex + ' failed to parse, skipping its content', e);
+        slides.push({number: displayIndex, blocks: [], notes: [], images: []});
+      }
     }
     return slides;
   }
@@ -1682,23 +1716,6 @@
   }
 
   // ---------- Dispatcher ----------
-  // ---------- Optional conversion server (for true cross-format highlighting) ----------
-  // Baked-in default so the whole team gets cross-format comparison with zero
-  // setup. A per-browser override (via the settings panel) still takes priority.
-  const DEFAULT_SERVER_URL = 'https://diffchecker-server-q57c.onrender.com';
-  const SERVER_URL_KEY = 'diffchecker_server_url';
-  const SERVER_OFF_SENTINEL = '__off__';
-  function getServerUrl(){
-    try{
-      const stored = (localStorage.getItem(SERVER_URL_KEY) || '').trim();
-      if(stored === SERVER_OFF_SENTINEL) return '';
-      return stored || DEFAULT_SERVER_URL;
-    } catch(e){ return DEFAULT_SERVER_URL; }
-  }
-  function setServerUrl(url){
-    const trimmed = url.trim();
-    try{ localStorage.setItem(SERVER_URL_KEY, trimmed === '' ? SERVER_OFF_SENTINEL : trimmed); } catch(e){ /* ignore */ }
-  }
 
   async function convertToPdfViaServer(buf, filename, serverUrl){
     const form = new FormData();
