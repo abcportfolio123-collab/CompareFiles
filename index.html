@@ -579,6 +579,8 @@
     cursor:pointer;
   }
   .btn-small:hover{background:var(--accent-soft);}
+  .zoom-controls{display:flex; align-items:center; gap:6px;}
+  .zoom-level{font-family:var(--mono); font-size:12px; color:var(--ink-soft); min-width:38px; text-align:center;}
 
   /* docx */
   .docx-panes{display:flex; gap:20px; max-width:1400px; margin:0 auto;}
@@ -622,6 +624,9 @@
   .diffline-row{padding:1px 0; word-break:break-word;}
   .diffline-row.changed-line{background:rgba(0,0,0,0.02);}
   .diffline-empty{color:var(--ink-soft); font-style:italic;}
+  .slide-two-col{display:flex; gap:16px;}
+  .slide-two-col > div{flex:1; min-width:0;}
+  .slide-file-label{font-size:10px; color:var(--ink-soft); margin-bottom:4px; font-family:var(--mono); text-transform:uppercase; letter-spacing:0.4px;}
   .slide-thumbs-row{display:flex; gap:16px;}
   .slide-thumbs{flex:1; display:flex; flex-wrap:wrap; gap:8px;}
   .slide-thumb{max-width:140px; max-height:100px; border:1px solid var(--line-strong); border-radius:4px; object-fit:contain; background:#fff;}
@@ -667,6 +672,10 @@
   .pdf-page-frame{position:relative; border:1px solid var(--line); border-radius:6px; overflow:hidden; width:100%; box-shadow:0 1px 4px rgba(26,35,50,0.06);}
   .pdf-page-frame img{width:100%; height:100%; display:block; border:none; border-radius:0; object-fit:fill;}
   .pdf-page-group .slide-notes-section{border-top:1px solid var(--line); margin:0;}
+  .pdf-notes-row{border-top:1px solid var(--line); background:var(--paper); padding:12px 16px;}
+  .pdf-notes-row .pdf-page-col{padding:0;}
+  .pdf-notes-row .slide-col-label{font-size:10.5px; text-transform:uppercase; letter-spacing:0.6px; color:var(--ink-soft); font-weight:600; margin-bottom:6px;}
+  .notes-text{font-family:var(--mono); font-size:13px; line-height:1.7;}
   .pdf-gutter{
     width:22px; flex-shrink:0; align-self:stretch;
     position:sticky; top:70px;
@@ -678,9 +687,9 @@
   .pdf-gutter-marks{position:relative; height:100%;}
   .pdf-gutter-mark{position:absolute; left:4px; right:4px; background:var(--amber); border-radius:2px; cursor:pointer; min-height:3px;}
   .pdf-gutter-mark:hover{background:#d68f38;}
-  .pdf-hl{position:absolute; border-radius:2px; pointer-events:none;}
-  .pdf-hl-rem{background:rgba(232,165,165,0.55); outline:1px solid rgba(138,44,44,0.35);}
-  .pdf-hl-add{background:rgba(169,199,230,0.55); outline:1px solid rgba(31,78,121,0.35);}
+  .pdf-hl{position:absolute; border-radius:1px; pointer-events:none; mix-blend-mode:multiply;}
+  .pdf-hl-rem{background:rgba(232,120,120,0.32);}
+  .pdf-hl-add{background:rgba(120,170,225,0.32);}
   .pdf-missing{border:1px dashed var(--line-strong); border-radius:4px; padding:40px; text-align:center; color:var(--ink-soft); font-size:12px;}
 </style>
 </head>
@@ -1284,20 +1293,39 @@
     return slides;
   }
 
-  function computeParaDiff(leftTexts, rightTexts){
+  // Aligns paragraphs between two documents by content (LCS), pairing up
+  // consecutive removed+added runs as "changed" pairs — same pattern as the
+  // line-diff engine — so a modified paragraph gets a real word-level diff
+  // instead of the whole paragraph just being flagged as replaced.
+  function alignParagraphs(leftTexts, rightTexts){
     const parts = Diff.diffArrays(leftTexts, rightTexts);
-    const leftFlags = []; const rightFlags = [];
-    let remCount = 0, addCount = 0;
-    parts.forEach(part => {
+    const alignment = [];
+    let li = 0, ri = 0, i = 0;
+    while(i < parts.length){
+      const part = parts[i];
       if(!part.added && !part.removed){
-        part.value.forEach(() => { leftFlags.push(false); rightFlags.push(false); });
+        part.value.forEach(() => { alignment.push({type:'same', leftIdx: li, rightIdx: ri}); li++; ri++; });
+        i++;
+      } else if(part.removed && parts[i+1] && parts[i+1].added){
+        const remCount = part.value.length, addCount = parts[i+1].value.length;
+        const maxCount = Math.max(remCount, addCount);
+        for(let k=0; k<maxCount; k++){
+          const hasLeft = k < remCount, hasRight = k < addCount;
+          if(hasLeft && hasRight) alignment.push({type:'changed', leftIdx: li+k, rightIdx: ri+k});
+          else if(hasLeft) alignment.push({type:'removed', leftIdx: li+k});
+          else alignment.push({type:'added', rightIdx: ri+k});
+        }
+        li += remCount; ri += addCount;
+        i += 2;
       } else if(part.removed){
-        part.value.forEach(() => { leftFlags.push(true); remCount++; });
+        part.value.forEach(() => { alignment.push({type:'removed', leftIdx: li}); li++; });
+        i++;
       } else if(part.added){
-        part.value.forEach(() => { rightFlags.push(true); addCount++; });
+        part.value.forEach(() => { alignment.push({type:'added', rightIdx: ri}); ri++; });
+        i++;
       }
-    });
-    return {leftFlags, rightFlags, remCount, addCount};
+    }
+    return alignment;
   }
 
   // Extracts, for one PDF page, the rendered page image plus every word's
@@ -1393,6 +1421,29 @@
   }
 
   // ---------- Rich-result UI plumbing ----------
+  // Generic zoom control shared by every rich view (docx panes, pptx slides,
+  // pdf pages, xlsx sheets). Uses CSS zoom where supported (Chromium/Edge)
+  // and falls back to a CSS transform scale for browsers without it (Firefox).
+  function setupZoomControls(containerId, zoomInId, zoomOutId, levelId){
+    let scale = 1;
+    const container = el(containerId);
+    const levelEl = el(levelId);
+    const supportsZoom = 'zoom' in document.body.style;
+    function apply(){
+      if(supportsZoom){
+        container.style.zoom = scale;
+      } else {
+        container.style.transform = 'scale(' + scale + ')';
+        container.style.transformOrigin = 'top left';
+        container.style.width = (100 / scale) + '%';
+      }
+      levelEl.textContent = Math.round(scale * 100) + '%';
+    }
+    el(zoomInId).addEventListener('click', () => { scale = Math.min(Math.round((scale + 0.1) * 10) / 10, 2); apply(); });
+    el(zoomOutId).addEventListener('click', () => { scale = Math.max(Math.round((scale - 0.1) * 10) / 10, 0.5); apply(); });
+    apply();
+  }
+
   function showRichResult(html){
     introScreen.classList.add('hidden');
     resultScreen.classList.add('active');
@@ -1431,26 +1482,45 @@
       const rightBlocks = Array.from(rightContainer.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6'));
       const leftTexts = leftBlocks.map(b => b.textContent.trim());
       const rightTexts = rightBlocks.map(b => b.textContent.trim());
-      const {leftFlags, rightFlags, remCount, addCount} = computeParaDiff(leftTexts, rightTexts);
-      leftBlocks.forEach((b,i) => { if(leftFlags[i] && b.textContent.trim() !== '') b.classList.add('removed-para'); });
-      rightBlocks.forEach((b,i) => { if(rightFlags[i] && b.textContent.trim() !== '') b.classList.add('added-para'); });
+
+      const alignment = alignParagraphs(leftTexts, rightTexts);
+      let remCount = 0, addCount = 0;
+      alignment.forEach(entry => {
+        if(entry.type === 'changed'){
+          const lt = leftTexts[entry.leftIdx], rt = rightTexts[entry.rightIdx];
+          const wd = Diff.diffWords(lt, rt);
+          wd.forEach(p => { if(p.removed) remCount += countWords(p.value); if(p.added) addCount += countWords(p.value); });
+          const leftEl = leftBlocks[entry.leftIdx], rightEl = rightBlocks[entry.rightIdx];
+          if(leftEl && lt !== '') leftEl.innerHTML = renderWordDiff(wd, false) || '&nbsp;';
+          if(rightEl && rt !== '') rightEl.innerHTML = renderWordDiff(wd, true) || '&nbsp;';
+        } else if(entry.type === 'removed'){
+          const el = leftBlocks[entry.leftIdx];
+          const t = leftTexts[entry.leftIdx];
+          if(el && t !== ''){ remCount += countWords(t); el.innerHTML = '<mark class="diff-del">' + escapeHtml(t) + '</mark>'; }
+        } else if(entry.type === 'added'){
+          const el = rightBlocks[entry.rightIdx];
+          const t = rightTexts[entry.rightIdx];
+          if(el && t !== ''){ addCount += countWords(t); el.innerHTML = '<mark class="diff-add">' + escapeHtml(t) + '</mark>'; }
+        }
+      });
 
       const html = `
         <div class="docx-toolbar">
-          <span class="rich-label">Formatted document — changed paragraphs highlighted</span>
-          <span class="stat-pill rem">${remCount} changed / removed</span>
-          <span class="stat-pill add">${addCount} changed / added</span>
-          <button class="btn-small" id="toggleDocxText">View exact word differences</button>
+          <span class="rich-label">Formatted document — exact changed words highlighted</span>
+          <span class="stat-pill rem">${remCount} removed</span>
+          <span class="stat-pill add">${addCount} added</span>
+          <div class="zoom-controls">
+            <button class="nav-btn" id="docxZoomOut" title="Zoom out">−</button>
+            <span class="zoom-level" id="docxZoomLevel">100%</span>
+            <button class="nav-btn" id="docxZoomIn" title="Zoom in">+</button>
+          </div>
         </div>
-        <div class="docx-panes">
+        <div class="docx-panes" id="docxPanesZoom">
           <div class="docx-pane"><div class="docx-pane-head">${escapeHtml(fileNameL)}</div><div class="docx-pane-body">${leftContainer.innerHTML}</div></div>
           <div class="docx-pane"><div class="docx-pane-head">${escapeHtml(fileNameR)}</div><div class="docx-pane-body">${rightContainer.innerHTML}</div></div>
         </div>`;
       showRichResult(html);
-      el('toggleDocxText').addEventListener('click', () => {
-        currentMode = 'text';
-        runTextCompare(el('textLeft').value, el('textRight').value);
-      });
+      setupZoomControls('docxPanesZoom', 'docxZoomIn', 'docxZoomOut', 'docxZoomLevel');
     } finally {
       hideLoading();
     }
@@ -1505,7 +1575,15 @@
       ]);
       const pairs = alignSlides(leftSlides, rightSlides);
       let totalRem = 0, totalAdd = 0;
-      let html = `<div class="docx-toolbar"><span class="rich-label">Slide-by-slide comparison — content and speaker notes</span><span id="pptxStats"></span></div><div class="pptx-list">`;
+      let html = `<div class="docx-toolbar">
+        <span class="rich-label">Slide-by-slide comparison — content and speaker notes</span>
+        <span id="pptxStats"></span>
+        <div class="zoom-controls">
+          <button class="nav-btn" id="pptxZoomOut" title="Zoom out">−</button>
+          <span class="zoom-level" id="pptxZoomLevel">100%</span>
+          <button class="nav-btn" id="pptxZoomIn" title="Zoom in">+</button>
+        </div>
+      </div><div class="pptx-list" id="pptxListZoom">`;
 
       pairs.forEach((pair, i) => {
         const ls = pair.left, rs = pair.right;
@@ -1535,15 +1613,25 @@
             </div>
           </div>`;
         }
+        const contentLeftHtml = contentDiff.leftLines.map(l => buildLineHtml(l, 'left')).join('<br>') || '<span class="diffline-empty">No content</span>';
+        const contentRightHtml = contentDiff.rightLines.map(l => buildLineHtml(l, 'right')).join('<br>') || '<span class="diffline-empty">No content</span>';
+        const notesLeftHtml = notesDiff.leftLines.map(l => buildLineHtml(l, 'left')).join('<br>') || '<span class="diffline-empty">No notes</span>';
+        const notesRightHtml = notesDiff.rightLines.map(l => buildLineHtml(l, 'right')).join('<br>') || '<span class="diffline-empty">No notes</span>';
         html += `<div class="slide-card ${slideChanged ? 'slide-changed' : ''}">
           <div class="slide-card-head">Slide ${i+1}${!ls ? '<span class="tag-missing">not in original</span>' : ''}${!rs ? '<span class="tag-missing">removed in revised</span>' : ''}</div>
           <div class="slide-section">
             <div class="slide-col-label">Content</div>
-            ${unifiedHtmlFromLines(contentDiff.leftLines, contentDiff.rightLines)}
+            <div class="slide-two-col">
+              <div><div class="slide-file-label">${escapeHtml(fileNameL)}</div>${contentLeftHtml}</div>
+              <div><div class="slide-file-label">${escapeHtml(fileNameR)}</div>${contentRightHtml}</div>
+            </div>
           </div>
           <div class="slide-section slide-notes-section">
             <div class="slide-col-label">Speaker notes</div>
-            ${unifiedHtmlFromLines(notesDiff.leftLines, notesDiff.rightLines)}
+            <div class="slide-two-col">
+              <div><div class="slide-file-label">${escapeHtml(fileNameL)}</div>${notesLeftHtml}</div>
+              <div><div class="slide-file-label">${escapeHtml(fileNameR)}</div>${notesRightHtml}</div>
+            </div>
           </div>
           ${imagesHtml}
         </div>`;
@@ -1551,6 +1639,7 @@
       html += `</div>`;
       showRichResult(html);
       el('pptxStats').innerHTML = `<span class="stat-pill rem">${totalRem} removed</span> <span class="stat-pill add">${totalAdd} added</span>`;
+      setupZoomControls('pptxListZoom', 'pptxZoomIn', 'pptxZoomOut', 'pptxZoomLevel');
     } finally {
       hideLoading();
     }
@@ -1577,10 +1666,16 @@
           <span class="rich-label">Spreadsheet comparison — changed cells highlighted</span>
           <span class="stat-pill rem">${totalRem} removed</span>
           <span class="stat-pill add">${totalAdd} added</span>
+          <div class="zoom-controls">
+            <button class="nav-btn" id="xlsxZoomOut" title="Zoom out">−</button>
+            <span class="zoom-level" id="xlsxZoomLevel">100%</span>
+            <button class="nav-btn" id="xlsxZoomIn" title="Zoom in">+</button>
+          </div>
         </div>
         <div class="sheet-tabs">${tabsHtml}</div>
-        <div class="sheet-panels">${panelsHtml}</div>`;
+        <div class="sheet-panels" id="sheetPanelsZoom">${panelsHtml}</div>`;
       showRichResult(html);
+      setupZoomControls('sheetPanelsZoom', 'xlsxZoomIn', 'xlsxZoomOut', 'xlsxZoomLevel');
       document.querySelectorAll('.sheet-tab').forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll('.sheet-tab').forEach(b => b.classList.remove('active'));
@@ -1624,6 +1719,11 @@
         </div>
         <span class="stat-pill rem" id="pdfRemStat">0 removed</span>
         <span class="stat-pill add" id="pdfAddStat">0 added</span>
+        <div class="zoom-controls">
+          <button class="nav-btn" id="pdfZoomOut" title="Zoom out">−</button>
+          <span class="zoom-level" id="pdfZoomLevel">100%</span>
+          <button class="nav-btn" id="pdfZoomIn" title="Zoom in">+</button>
+        </div>
       </div>
       <div class="pdf-compare-wrap">
         <div class="pdf-pages" id="pdfPagesList">`;
@@ -1665,9 +1765,17 @@
           const nStats = statsFromLines(nd.leftLines, nd.rightLines);
           if(nStats.rem || nStats.add) pageHasChange = true;
           totalRem += nStats.rem; totalAdd += nStats.add;
-          notesHtml = `<div class="slide-section slide-notes-section">
-            <div class="slide-col-label">Speaker notes</div>
-            ${unifiedHtmlFromLines(nd.leftLines, nd.rightLines)}
+          const leftNotesHtml = nd.leftLines.map(l => buildLineHtml(l, 'left')).join('<br>') || '<span class="diffline-empty">No notes</span>';
+          const rightNotesHtml = nd.rightLines.map(l => buildLineHtml(l, 'right')).join('<br>') || '<span class="diffline-empty">No notes</span>';
+          notesHtml = `<div class="pdf-page-row pdf-notes-row">
+            <div class="pdf-page-col">
+              <div class="slide-col-label">Speaker notes — ${escapeHtml(fileNameL)}</div>
+              <div class="notes-text">${leftNotesHtml}</div>
+            </div>
+            <div class="pdf-page-col">
+              <div class="slide-col-label">Speaker notes — ${escapeHtml(fileNameR)}</div>
+              <div class="notes-text">${rightNotesHtml}</div>
+            </div>
           </div>`;
         }
 
@@ -1695,6 +1803,7 @@
       el('pdfRemStat').textContent = totalRem + ' removed';
       el('pdfAddStat').textContent = totalAdd + ' added';
       setupPdfNavigation(changedPageIndices);
+      setupZoomControls('pdfPagesList', 'pdfZoomIn', 'pdfZoomOut', 'pdfZoomLevel');
     } finally {
       hideLoading();
     }
@@ -2234,6 +2343,17 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
       ${liveCss}
+      /* Static report overrides: the live app constrains several containers
+         to viewport height with internal scrolling (a fixed-height panel with
+         its own scrollbar). A downloaded report has no viewport chrome to
+         anchor that to, so those constraints must be neutralized here or
+         content silently clips to whatever the first screenful was. */
+      html, body{height:auto !important; overflow:visible !important;}
+      .stage, .result, #resultScreen, .rich-result, .rich-body,
+      .pdf-gutter, .docx-pane-body, .sheet-panel, .sheet-panels,
+      .pane-scroll, .doc-body, .pptx-list, .docx-panes, .pdf-pages, .pdf-compare-wrap{
+        height:auto !important; max-height:none !important; overflow:visible !important; position:static !important;
+      }
       body{margin:0; padding:24px; overflow-x:hidden;}
       .rich-body{padding:0;}
       .cols{display:flex; gap:16px; max-width:1400px; margin:0 auto;}
