@@ -47,18 +47,19 @@
     display:flex;
     align-items:center;
     justify-content:space-between;
-    padding:10px 20px;
-    background:var(--ink);
+    padding:12px 24px;
+    background:linear-gradient(180deg, #1f2b3d 0%, var(--ink) 100%);
     color:#fff;
     flex-shrink:0;
     z-index:20;
+    box-shadow:0 1px 0 rgba(255,255,255,0.06), 0 2px 8px rgba(0,0,0,0.15);
   }
   .brand{
     display:flex;
     align-items:center;
     gap:10px;
-    font-weight:600;
-    font-size:16px;
+    font-weight:700;
+    font-size:17px;
     letter-spacing:0.2px;
   }
   .brand .mark{
@@ -130,15 +131,20 @@
     text-align:center;
   }
   .intro-head h1{
-    font-size:28px;
-    margin:0 0 8px;
+    font-size:32px;
+    margin:0 0 10px;
     font-weight:700;
-    letter-spacing:-0.3px;
+    letter-spacing:-0.5px;
+    color:var(--ink);
   }
   .intro-head p{
     color:var(--ink-soft);
-    font-size:14.5px;
+    font-size:15px;
     margin:0;
+    max-width:560px;
+    margin-left:auto;
+    margin-right:auto;
+    line-height:1.6;
   }
   .input-grid{
     display:grid;
@@ -260,9 +266,10 @@
     justify-content:center;
   }
   .compare-cta .btn-primary{
-    padding:12px 32px;
-    font-size:14.5px;
-    border-radius:6px;
+    padding:13px 36px;
+    font-size:15px;
+    border-radius:8px;
+    box-shadow:0 2px 8px rgba(193,127,46,0.3);
   }
   .err-msg{
     text-align:center;
@@ -310,11 +317,12 @@
     display:flex;
     align-items:center;
     justify-content:space-between;
-    padding:8px 20px;
+    padding:10px 22px;
     background:var(--panel);
     border-bottom:1px solid var(--line);
     flex-shrink:0;
     gap:16px;
+    box-shadow:0 1px 2px rgba(26,35,50,0.03);
   }
   .toolstrip-group{display:flex; align-items:center; gap:8px;}
   .nav-btn{
@@ -546,11 +554,12 @@
     display:flex;
     align-items:center;
     gap:12px;
-    padding:10px 20px;
+    padding:10px 22px;
     background:var(--panel);
     border-bottom:1px solid var(--line);
     flex-wrap:wrap;
     flex-shrink:0;
+    box-shadow:0 1px 2px rgba(26,35,50,0.03);
   }
   .rich-label{
     font-size:13px;
@@ -645,13 +654,19 @@
   .pdf-nav{display:flex; align-items:center; gap:8px;}
   .pdf-compare-wrap{display:flex; gap:0; align-items:flex-start; max-width:1240px; margin:0 auto;}
   .pdf-pages{display:flex; flex-direction:column; gap:24px; flex:1; min-width:0;}
-  .pdf-page-row{display:flex; gap:16px; scroll-margin:20px; border-radius:6px; transition:box-shadow 0.2s;}
-  .pdf-page-row.pdf-jump-target{box-shadow:0 0 0 3px var(--amber);}
+  .pdf-page-group{
+    scroll-margin:20px; border-radius:8px; transition:box-shadow 0.2s ease;
+    background:#fff; border:1px solid var(--line); box-shadow:0 1px 3px rgba(26,35,50,0.04);
+    overflow:hidden;
+  }
+  .pdf-page-group.pdf-jump-target{box-shadow:0 0 0 3px var(--amber);}
+  .pdf-page-row{display:flex; gap:16px; padding:16px;}
   .pdf-page-col{flex:1; min-width:0;}
   .pdf-page-label{font-family:var(--mono); font-size:11px; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;}
   .pdf-page-col img{width:100%; border:1px solid var(--line); border-radius:4px; display:block;}
   .pdf-page-frame{position:relative; border:1px solid var(--line); border-radius:6px; overflow:hidden; width:100%; box-shadow:0 1px 4px rgba(26,35,50,0.06);}
   .pdf-page-frame img{width:100%; height:100%; display:block; border:none; border-radius:0; object-fit:fill;}
+  .pdf-page-group .slide-notes-section{border-top:1px solid var(--line); margin:0;}
   .pdf-gutter{
     width:22px; flex-shrink:0; align-self:stretch;
     position:sticky; top:70px;
@@ -1584,7 +1599,7 @@
     await renderPdfCompareFromBuffers(docMeta.left.buf.slice(0), docMeta.right.buf.slice(0));
   }
 
-  async function renderPdfCompareFromBuffers(leftBuf, rightBuf, labelOverride){
+  async function renderPdfCompareFromBuffers(leftBuf, rightBuf, labelOverride, notesPerPage){
     showLoading('Rendering pages…');
     try{
       const scale = 1.5;
@@ -1592,7 +1607,7 @@
         renderPdfPagesWithWords(leftBuf, scale),
         renderPdfPagesWithWords(rightBuf, scale)
       ]);
-      const maxPages = Math.max(leftPages.length, rightPages.length);
+      const maxPages = Math.max(leftPages.length, rightPages.length, notesPerPage ? notesPerPage.length : 0);
       let totalRem = 0, totalAdd = 0;
       const changedPageIndices = []; // which pages (0-based) have at least one highlight
 
@@ -1644,17 +1659,32 @@
           rp.words.forEach(w => { rightHighlights += boxHtml(w, 'pdf-hl-add', rp.width, rp.height); totalAdd++; pageHasChange = true; });
         }
 
+        let notesHtml = '';
+        if(notesPerPage && notesPerPage[i] && (notesPerPage[i].left || notesPerPage[i].right)){
+          const nd = computeLineWordDiff(notesPerPage[i].left || '', notesPerPage[i].right || '', 'both');
+          const nStats = statsFromLines(nd.leftLines, nd.rightLines);
+          if(nStats.rem || nStats.add) pageHasChange = true;
+          totalRem += nStats.rem; totalAdd += nStats.add;
+          notesHtml = `<div class="slide-section slide-notes-section">
+            <div class="slide-col-label">Speaker notes</div>
+            ${unifiedHtmlFromLines(nd.leftLines, nd.rightLines)}
+          </div>`;
+        }
+
         if(pageHasChange) changedPageIndices.push(i);
 
-        html += `<div class="pdf-page-row${pageHasChange ? ' pdf-page-changed' : ''}" data-page-idx="${i}">
-          <div class="pdf-page-col">
-            <div class="pdf-page-label">Page ${i+1} — ${escapeHtml(fileNameL)}</div>
-            ${lp ? `<div class="pdf-page-frame" style="aspect-ratio:${lp.width}/${lp.height};"><img src="${lp.img}">${leftHighlights}</div>` : '<div class="pdf-missing">No page</div>'}
+        html += `<div class="pdf-page-group${pageHasChange ? ' pdf-page-changed' : ''}" data-page-idx="${i}">
+          <div class="pdf-page-row">
+            <div class="pdf-page-col">
+              <div class="pdf-page-label">Page ${i+1} — ${escapeHtml(fileNameL)}</div>
+              ${lp ? `<div class="pdf-page-frame" style="aspect-ratio:${lp.width}/${lp.height};"><img src="${lp.img}">${leftHighlights}</div>` : '<div class="pdf-missing">No page</div>'}
+            </div>
+            <div class="pdf-page-col">
+              <div class="pdf-page-label">Page ${i+1} — ${escapeHtml(fileNameR)}</div>
+              ${rp ? `<div class="pdf-page-frame" style="aspect-ratio:${rp.width}/${rp.height};"><img src="${rp.img}">${rightHighlights}</div>` : '<div class="pdf-missing">No page</div>'}
+            </div>
           </div>
-          <div class="pdf-page-col">
-            <div class="pdf-page-label">Page ${i+1} — ${escapeHtml(fileNameR)}</div>
-            ${rp ? `<div class="pdf-page-frame" style="aspect-ratio:${rp.width}/${rp.height};"><img src="${rp.img}">${rightHighlights}</div>` : '<div class="pdf-missing">No page</div>'}
-          </div>
+          ${notesHtml}
         </div>`;
       }
       html += `</div>
@@ -1843,6 +1873,37 @@
     }
   }
 
+  // PowerPoint gets special treatment: the server conversion shows the REAL
+  // visual slide design (colors, layout, images) which the browser alone can
+  // never render — but converting to PDF drops speaker notes entirely (PDF
+  // export doesn't include them). So: real visuals from the server, speaker
+  // notes read separately client-side and shown under each slide.
+  async function renderPptxServerCompare(serverUrl){
+    showLoading('Converting slides on server…');
+    try{
+      const leftBuf = docMeta.left.buf.slice(0);
+      const rightBuf = docMeta.right.buf.slice(0);
+      const [leftPdfBuf, rightPdfBuf, leftSlides, rightSlides] = await Promise.all([
+        convertToPdfViaServer(leftBuf, 'left.pptx', serverUrl),
+        convertToPdfViaServer(rightBuf, 'right.pptx', serverUrl),
+        parsePptxSlides(docMeta.left.buf.slice(0)),
+        parsePptxSlides(docMeta.right.buf.slice(0))
+      ]);
+      const maxLen = Math.max(leftSlides.length, rightSlides.length);
+      const notesPerPage = [];
+      for(let i=0; i<maxLen; i++){
+        notesPerPage.push({
+          left: leftSlides[i] ? leftSlides[i].notes.join('\n') : '',
+          right: rightSlides[i] ? rightSlides[i].notes.join('\n') : ''
+        });
+      }
+      currentMode = 'pdf';
+      await renderPdfCompareFromBuffers(leftPdfBuf, rightPdfBuf, 'Real slide design, converted on the server — speaker notes shown below each slide', notesPerPage);
+    } finally {
+      hideLoading();
+    }
+  }
+
   async function handleCompare(){
     const rawLeft = el('textLeft').value;
     const rawRight = el('textRight').value;
@@ -1853,22 +1914,22 @@
     showErr('');
 
     const mode = detectMode();
+    const serverUrl = getServerUrl();
 
-    // The server-conversion pipeline is only for genuinely different file types
-    // (no shared native renderer exists for those). Same-type pairs already have
-    // a better native comparison — real formatting for Word, real slide structure
-    // AND speaker notes for PowerPoint, a real cell grid for Excel, and the same
-    // position-highlighted page view for PDF — so they never go through the server.
-    if(mode === 'mixed'){
-      const serverUrl = getServerUrl();
-      if(serverUrl){
-        try{
-          await renderServerCompare(serverUrl);
-          return;
-        } catch(err){
-          console.error('Server compare failed, falling back:', err);
-          showErr('Server comparison failed (' + err.message + ') — showing each file in its native format instead, with no cross-format highlighting.');
-        }
+    // PPTX and mixed-format pairs benefit from server conversion (real visuals
+    // for PPTX; a shared format at all for mixed pairs). Word/Excel/PDF already
+    // have a better, complete native comparison, so they skip the server.
+    if((mode === 'pptx' || mode === 'mixed') && serverUrl){
+      try{
+        if(mode === 'pptx') await renderPptxServerCompare(serverUrl);
+        else await renderServerCompare(serverUrl);
+        return;
+      } catch(err){
+        console.error('Server compare failed, falling back:', err);
+        const fallbackNote = mode === 'pptx'
+          ? ' — showing slide content and notes as text instead of real slide visuals.'
+          : ' — showing each file in its native format instead, with no cross-format highlighting.';
+        showErr('Server comparison failed (' + err.message + ')' + fallbackNote);
       }
     }
 
