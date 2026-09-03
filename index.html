@@ -560,6 +560,9 @@
     flex-wrap:wrap;
     flex-shrink:0;
     box-shadow:0 1px 2px rgba(26,35,50,0.03);
+    position:sticky;
+    top:0;
+    z-index:6;
   }
   .rich-label{
     font-size:13px;
@@ -596,9 +599,9 @@
     border-bottom:1px solid var(--line);
     background:var(--paper);
   }
-  .docx-pane-body{padding:22px 26px; font-size:14.5px; line-height:1.7;}
+  .docx-pane-body{padding:22px 26px; font-size:14.5px; line-height:1.7; overflow-x:auto;}
   .docx-pane-body img{max-width:100%;}
-  .docx-pane-body table{border-collapse:collapse; margin:10px 0;}
+  .docx-pane-body table{border-collapse:collapse; margin:10px 0; max-width:none;}
   .docx-pane-body td, .docx-pane-body th{border:1px solid var(--line-strong); padding:4px 8px;}
   .removed-para{background:var(--removed-bg); border-left:3px solid var(--removed-border); padding-left:10px; margin-left:-13px; border-radius:0 4px 4px 0;}
   .added-para{background:var(--added-bg); border-left:3px solid var(--added-border); padding-left:10px; margin-left:-13px; border-radius:0 4px 4px 0;}
