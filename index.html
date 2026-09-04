@@ -688,8 +688,8 @@
     overflow:hidden;
   }
   .pdf-gutter-marks{position:relative; height:100%;}
-  .pdf-gutter-mark{position:absolute; left:4px; right:4px; background:var(--amber); border-radius:2px; cursor:pointer; min-height:3px;}
-  .pdf-gutter-mark:hover{background:#d68f38;}
+  .pdf-gutter-mark{position:absolute; left:3px; right:3px; height:6px; transform:translateY(-50%); background:var(--amber); border-radius:2px; cursor:pointer;}
+  .pdf-gutter-mark:hover{height:8px; background:#d68f38;}
   .pdf-hl{position:absolute; border-radius:1px; pointer-events:none; mix-blend-mode:multiply;}
   .pdf-hl-rem{background:rgba(232,120,120,0.32);}
   .pdf-hl-add{background:rgba(120,170,225,0.32);}
@@ -1425,21 +1425,20 @@
 
   // ---------- Rich-result UI plumbing ----------
   // Generic zoom control shared by every rich view (docx panes, pptx slides,
-  // pdf pages, xlsx sheets). Uses CSS zoom where supported (Chromium/Edge)
-  // and falls back to a CSS transform scale for browsers without it (Firefox).
+  // pdf pages, xlsx sheets). Uses transform:scale on a flex:none, fixed-width
+  // copy of the container — applying zoom/transform directly to a flex:1 item
+  // doesn't work reliably, because the flex parent still dictates its width
+  // regardless of the item's own internal scaling, so nothing visibly grows.
   function setupZoomControls(containerId, zoomInId, zoomOutId, levelId){
     let scale = 1;
     const container = el(containerId);
     const levelEl = el(levelId);
-    const supportsZoom = 'zoom' in document.body.style;
+    const naturalWidth = container.getBoundingClientRect().width;
+    container.style.flex = 'none';
+    container.style.width = naturalWidth + 'px';
+    container.style.transformOrigin = 'top left';
     function apply(){
-      if(supportsZoom){
-        container.style.zoom = scale;
-      } else {
-        container.style.transform = 'scale(' + scale + ')';
-        container.style.transformOrigin = 'top left';
-        container.style.width = (100 / scale) + '%';
-      }
+      container.style.transform = 'scale(' + scale + ')';
       levelEl.textContent = Math.round(scale * 100) + '%';
     }
     el(zoomInId).addEventListener('click', () => { scale = Math.min(Math.round((scale + 0.1) * 10) / 10, 2); apply(); });
@@ -1488,7 +1487,8 @@
 
       const alignment = alignParagraphs(leftTexts, rightTexts);
       let remCount = 0, addCount = 0;
-      alignment.forEach(entry => {
+      const changedEntryIdx = []; // indices into `alignment` that are real changes, for nav + minimap
+      alignment.forEach((entry, entryIdx) => {
         if(entry.type === 'changed'){
           const lt = leftTexts[entry.leftIdx], rt = rightTexts[entry.rightIdx];
           const wd = Diff.diffWords(lt, rt);
@@ -1496,20 +1496,44 @@
           const leftEl = leftBlocks[entry.leftIdx], rightEl = rightBlocks[entry.rightIdx];
           if(leftEl && lt !== '') leftEl.innerHTML = renderWordDiff(wd, false) || '&nbsp;';
           if(rightEl && rt !== '') rightEl.innerHTML = renderWordDiff(wd, true) || '&nbsp;';
+          if(lt !== '' || rt !== ''){
+            if(leftEl) leftEl.setAttribute('data-diff-idx', entryIdx);
+            if(rightEl) rightEl.setAttribute('data-diff-idx', entryIdx);
+            changedEntryIdx.push(entryIdx);
+          }
         } else if(entry.type === 'removed'){
           const el = leftBlocks[entry.leftIdx];
           const t = leftTexts[entry.leftIdx];
-          if(el && t !== ''){ remCount += countWords(t); el.innerHTML = '<mark class="diff-del">' + escapeHtml(t) + '</mark>'; }
+          if(el && t !== ''){
+            remCount += countWords(t);
+            el.innerHTML = '<mark class="diff-del">' + escapeHtml(t) + '</mark>';
+            el.setAttribute('data-diff-idx', entryIdx);
+            changedEntryIdx.push(entryIdx);
+          }
         } else if(entry.type === 'added'){
           const el = rightBlocks[entry.rightIdx];
           const t = rightTexts[entry.rightIdx];
-          if(el && t !== ''){ addCount += countWords(t); el.innerHTML = '<mark class="diff-add">' + escapeHtml(t) + '</mark>'; }
+          if(el && t !== ''){
+            addCount += countWords(t);
+            el.innerHTML = '<mark class="diff-add">' + escapeHtml(t) + '</mark>';
+            el.setAttribute('data-diff-idx', entryIdx);
+            changedEntryIdx.push(entryIdx);
+          }
         }
       });
 
       const html = `
         <div class="docx-toolbar">
           <span class="rich-label">Formatted document — exact changed words highlighted</span>
+          <div class="pdf-nav">
+            <button class="nav-btn" id="docxPrevChange" title="Previous change">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 15l-6-6-6 6"/></svg>
+            </button>
+            <button class="nav-btn" id="docxNextChange" title="Next change">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <span class="change-counter" id="docxChangeCounter">0 of 0 changes</span>
+          </div>
           <span class="stat-pill rem">${remCount} removed</span>
           <span class="stat-pill add">${addCount} added</span>
           <div class="zoom-controls">
@@ -1518,12 +1542,16 @@
             <button class="nav-btn" id="docxZoomIn" title="Zoom in">+</button>
           </div>
         </div>
-        <div class="docx-panes" id="docxPanesZoom">
-          <div class="docx-pane"><div class="docx-pane-head">${escapeHtml(fileNameL)}</div><div class="docx-pane-body">${leftContainer.innerHTML}</div></div>
-          <div class="docx-pane"><div class="docx-pane-head">${escapeHtml(fileNameR)}</div><div class="docx-pane-body">${rightContainer.innerHTML}</div></div>
+        <div class="pdf-compare-wrap">
+          <div class="docx-panes" id="docxPanesZoom">
+            <div class="docx-pane"><div class="docx-pane-head">${escapeHtml(fileNameL)}</div><div class="docx-pane-body">${leftContainer.innerHTML}</div></div>
+            <div class="docx-pane"><div class="docx-pane-head">${escapeHtml(fileNameR)}</div><div class="docx-pane-body">${rightContainer.innerHTML}</div></div>
+          </div>
+          <div class="pdf-gutter" id="docxGutter"><div class="pdf-gutter-marks" id="docxGutterMarks"></div></div>
         </div>`;
       showRichResult(html);
       setupZoomControls('docxPanesZoom', 'docxZoomIn', 'docxZoomOut', 'docxZoomLevel');
+      setupDocxNavigation(changedEntryIdx);
     } finally {
       hideLoading();
     }
@@ -1812,6 +1840,52 @@
     }
   }
 
+  function setupDocxNavigation(changedEntryIdx){
+    const counterEl = el('docxChangeCounter');
+    const prevBtn = el('docxPrevChange');
+    const nextBtn = el('docxNextChange');
+    const gutterMarks = el('docxGutterMarks');
+    const panesZoom = el('docxPanesZoom');
+    let currentIdx = -1;
+
+    counterEl.textContent = (changedEntryIdx.length ? 1 : 0) + ' of ' + changedEntryIdx.length + ' changes';
+    prevBtn.disabled = changedEntryIdx.length === 0;
+    nextBtn.disabled = changedEntryIdx.length === 0;
+
+    function jumpTo(pos){
+      if(pos < 0 || pos >= changedEntryIdx.length) return;
+      currentIdx = pos;
+      counterEl.textContent = (pos + 1) + ' of ' + changedEntryIdx.length + ' changes';
+      const diffIdx = changedEntryIdx[pos];
+      document.querySelectorAll('[data-diff-idx].pdf-jump-target').forEach(elx => elx.classList.remove('pdf-jump-target'));
+      const targets = panesZoom.querySelectorAll('[data-diff-idx="' + diffIdx + '"]');
+      targets.forEach(t => t.classList.add('pdf-jump-target'));
+      if(targets[0]) targets[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+
+    prevBtn.addEventListener('click', () => jumpTo(currentIdx <= 0 ? changedEntryIdx.length - 1 : currentIdx - 1));
+    nextBtn.addEventListener('click', () => jumpTo((currentIdx + 1) % changedEntryIdx.length));
+
+    requestAnimationFrame(() => {
+      const totalHeight = panesZoom.scrollHeight || 1;
+      gutterMarks.innerHTML = '';
+      const seen = new Set();
+      changedEntryIdx.forEach((diffIdx, pos) => {
+        if(seen.has(diffIdx)) return;
+        seen.add(diffIdx);
+        const target = panesZoom.querySelector('[data-diff-idx="' + diffIdx + '"]');
+        if(!target) return;
+        const centerPct = ((target.offsetTop + target.offsetHeight / 2) / totalHeight) * 100;
+        const mark = document.createElement('div');
+        mark.className = 'pdf-gutter-mark';
+        mark.style.top = centerPct + '%';
+        mark.title = 'Jump to change';
+        mark.addEventListener('click', () => jumpTo(pos));
+        gutterMarks.appendChild(mark);
+      });
+    });
+  }
+
   function setupPdfNavigation(changedPageIndices){
     const counterEl = el('pdfChangeCounter');
     const prevBtn = el('pdfPrevChange');
@@ -1847,12 +1921,13 @@
       changedPageIndices.forEach(pageIdx => {
         const row = pagesList.querySelector('[data-page-idx="' + pageIdx + '"]');
         if(!row) return;
-        const top = (row.offsetTop / totalHeight) * 100;
-        const height = Math.max((row.offsetHeight / totalHeight) * 100, 0.6);
+        // a thin dash centered on the row's position, not a bar spanning the
+        // whole (often very tall) page block — the mark should read as "here",
+        // not visually imply the entire page height changed.
+        const centerPct = ((row.offsetTop + row.offsetHeight / 2) / totalHeight) * 100;
         const mark = document.createElement('div');
         mark.className = 'pdf-gutter-mark';
-        mark.style.top = top + '%';
-        mark.style.height = height + '%';
+        mark.style.top = centerPct + '%';
         mark.title = 'Page ' + (pageIdx + 1) + ' — jump to change';
         mark.addEventListener('click', () => {
           const pos = changedPageIndices.indexOf(pageIdx);
