@@ -583,6 +583,7 @@
   }
   .btn-small:hover{background:var(--accent-soft);}
   .zoom-controls{display:flex; align-items:center; gap:6px;}
+  .extract-controls{display:flex; align-items:center; gap:6px;}
   .zoom-level{font-family:var(--mono); font-size:12px; color:var(--ink-soft); min-width:38px; text-align:center;}
 
   /* docx */
@@ -1331,6 +1332,90 @@
     return alignment;
   }
 
+  // ---------- Extract-only-changes: produces a real .docx (untouched
+  // formatting — we only delete whole paragraph XML nodes, never rewrite
+  // styling) containing just the added or just the removed paragraphs.
+  // Works directly against the raw uploaded files' XML, independent of
+  // whichever view (native or server) is currently displayed.
+  async function extractDocxParagraphs(buf){
+    const zip = await JSZip.loadAsync(buf);
+    const xmlText = await zip.file('word/document.xml').async('string');
+    const xmlDoc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    const paragraphs = Array.from(xmlDoc.getElementsByTagName('w:p'));
+    const texts = paragraphs.map(p => Array.from(p.getElementsByTagName('w:t')).map(t => t.textContent).join(''));
+    return {zip, xmlDoc, paragraphs, texts};
+  }
+
+  async function buildFilteredDocx(zip, xmlDoc, paragraphs, keepIndexSet){
+    paragraphs.forEach((p, idx) => {
+      if(!keepIndexSet.has(idx) && p.parentNode){
+        p.parentNode.removeChild(p);
+      }
+    });
+    const serialized = new XMLSerializer().serializeToString(xmlDoc);
+    zip.file('word/document.xml', serialized);
+    return await zip.generateAsync({ type: 'blob' });
+  }
+
+  async function extractAndDownload(kind){
+    if(!docMeta.left || !docMeta.right || docMeta.left.type !== 'docx' || docMeta.right.type !== 'docx'){
+      showErr('Extracting additions/removals only works when both files are Word documents.');
+      return;
+    }
+    showLoading(kind === 'added' ? 'Extracting added content…' : 'Extracting removed content…');
+    try{
+      const [leftData, rightData] = await Promise.all([
+        extractDocxParagraphs(docMeta.left.buf.slice(0)),
+        extractDocxParagraphs(docMeta.right.buf.slice(0))
+      ]);
+      const alignment = alignParagraphs(leftData.texts, rightData.texts);
+      let blob, filename;
+      if(kind === 'added'){
+        const keep = new Set();
+        alignment.forEach(entry => {
+          if((entry.type === 'added' || entry.type === 'changed') && entry.rightIdx !== undefined) keep.add(entry.rightIdx);
+        });
+        blob = await buildFilteredDocx(rightData.zip, rightData.xmlDoc, rightData.paragraphs, keep);
+        filename = 'added-content.docx';
+      } else {
+        const keep = new Set();
+        alignment.forEach(entry => {
+          if((entry.type === 'removed' || entry.type === 'changed') && entry.leftIdx !== undefined) keep.add(entry.leftIdx);
+        });
+        blob = await buildFilteredDocx(leftData.zip, leftData.xmlDoc, leftData.paragraphs, keep);
+        filename = 'removed-content.docx';
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch(err){
+      console.error(err);
+      showErr('Could not extract content: ' + err.message);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // Adds the "Extract added" / "Extract removed" buttons to whichever toolbar
+  // is currently showing, but only when both uploaded files are genuinely
+  // Word documents (the feature manipulates raw .docx XML directly).
+  function addExtractButtonsIfDocx(){
+    if(!docMeta.left || !docMeta.right || docMeta.left.type !== 'docx' || docMeta.right.type !== 'docx') return;
+    const toolbar = document.querySelector('.docx-toolbar');
+    if(!toolbar || toolbar.querySelector('#extractAddedBtn')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'extract-controls';
+    wrap.innerHTML = `
+      <button class="btn-small" id="extractAddedBtn" title="Download a .docx with only the added paragraphs, original formatting untouched">Extract added (blue)</button>
+      <button class="btn-small" id="extractRemovedBtn" title="Download a .docx with only the removed paragraphs, original formatting untouched">Extract removed (red)</button>
+    `;
+    toolbar.appendChild(wrap);
+    wrap.querySelector('#extractAddedBtn').addEventListener('click', () => extractAndDownload('added'));
+    wrap.querySelector('#extractRemovedBtn').addEventListener('click', () => extractAndDownload('removed'));
+  }
+
   // Extracts, for one PDF page, the rendered page image plus every word's
   // pixel bounding box (approximated proportionally within each text run —
   // pdf.js gives runs, not individual glyph positions, so word boxes are
@@ -1551,6 +1636,7 @@
         </div>`;
       showRichResult(html);
       setupZoomControls('docxPanesZoom', 'docxZoomIn', 'docxZoomOut', 'docxZoomLevel');
+      addExtractButtonsIfDocx();
       setupDocxNavigation(changedEntryIdx);
     } finally {
       hideLoading();
@@ -2055,6 +2141,7 @@
         ? 'Original pages, differences highlighted in place'
         : `${leftType.toUpperCase()} vs ${rightType.toUpperCase()} — both converted to PDF on the server, differences highlighted in place`;
       await renderPdfCompareFromBuffers(leftPdfBuf, rightPdfBuf, label);
+      addExtractButtonsIfDocx();
     } finally {
       hideLoading();
     }
@@ -2103,10 +2190,12 @@
     const mode = detectMode();
     const serverUrl = getServerUrl();
 
-    // PPTX and mixed-format pairs benefit from server conversion (real visuals
-    // for PPTX; a shared format at all for mixed pairs). Word/Excel/PDF already
-    // have a better, complete native comparison, so they skip the server.
-    if((mode === 'pptx' || mode === 'mixed') && serverUrl){
+    // PPTX, DOCX, and mixed-format pairs benefit from server conversion — for
+    // Word/PowerPoint it means the REAL LibreOffice-rendered page (matching the
+    // original formatting far more closely than the browser-only HTML render),
+    // and for mixed pairs it's the only way to get a shared format at all.
+    // Excel and PDF already have a complete native comparison and skip the server.
+    if((mode === 'pptx' || mode === 'docx' || mode === 'mixed') && serverUrl){
       try{
         if(mode === 'pptx') await renderPptxServerCompare(serverUrl);
         else await renderServerCompare(serverUrl);
@@ -2115,6 +2204,8 @@
         console.error('Server compare failed, falling back:', err);
         const fallbackNote = mode === 'pptx'
           ? ' — showing slide content and notes as text instead of real slide visuals.'
+          : mode === 'docx'
+          ? ' — showing the built-in formatted comparison instead.'
           : ' — showing each file in its native format instead, with no cross-format highlighting.';
         showErr('Server comparison failed (' + err.message + ')' + fallbackNote);
       }
